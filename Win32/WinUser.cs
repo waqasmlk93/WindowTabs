@@ -2815,6 +2815,21 @@ namespace Bemo
             }
             return pt;
         }
+        delegate bool SetProcessDpiAwarenessContextDelegate(IntPtr value);
+        // Per-Monitor-V2 (Win10 1703+) makes every window position/size this process reads or writes a real
+        // physical pixel. Without it, Windows virtualises coordinates per monitor and mixed-DPI setups break
+        // window moves. Falls back to system-DPI awareness on older Windows. Must run before any window exists.
+        public static bool SetPerMonitorV2DpiAwareness()
+        {
+            IntPtr functionPtr = WinBaseApi.GetProcAddress(WinBaseApi.GetModuleHandle("user32.dll"), "SetProcessDpiAwarenessContext");
+            if (functionPtr != IntPtr.Zero)
+            {
+                SetProcessDpiAwarenessContextDelegate del = (SetProcessDpiAwarenessContextDelegate)Marshal.GetDelegateForFunctionPointer(functionPtr, typeof(SetProcessDpiAwarenessContextDelegate));
+                if (del(new IntPtr(-4))) return true;   // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+            }
+            SetProcessDPIAware();
+            return false;
+        }
         delegate bool SetProcessDPIAwareDelegate();
         public static void SetProcessDPIAware()
         {

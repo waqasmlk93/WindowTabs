@@ -375,6 +375,8 @@ type Program() as this =
             | :? IDisposable as d -> d.Dispose()
             | _ -> ()
 
+//must be the first thing that runs, before any window or thread that owns one is created
+WinUserApi.SetPerMonitorV2DpiAwareness().ignore
 Application.SetCompatibleTextRenderingDefault(false)
 let program = Program()
 program.run(List2<obj>([
