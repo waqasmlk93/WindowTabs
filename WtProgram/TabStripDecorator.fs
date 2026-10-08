@@ -103,7 +103,15 @@ type TabStripDecorator(group:WindowGroup) as this =
                     bounds = row
                 })
             | None ->
-                this.ts.setPlacement(this.placement)
+                let normal = this.placement
+                if dock && normal.showInside.not && group.topWindow <> IntPtr.Zero then
+                    //docked bar above a restored window: exactly as wide as the part of the window you can see (the
+                    //window's own rectangle also covers the invisible resize borders) and ending where it begins
+                    let v = os.windowFromHwnd(group.topWindow).visibleBounds
+                    let h = group.tabAppearance.tabHeight
+                    this.ts.setPlacement({ normal with bounds = Rect(Pt(v.left, v.top - h), Sz(v.width, h)) })
+                else
+                    this.ts.setPlacement(normal)
             this.ts.visible <- true
 
     //watches the mouse: over the top edge of a window that has no other tab the bar opens (a timer, because there is no
