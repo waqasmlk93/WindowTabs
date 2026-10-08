@@ -120,12 +120,16 @@ type IProgram =
     abstract member suspendTabMonitoring : unit -> unit
     abstract member resumeTabMonitoring : unit -> unit
     abstract member llMouse : IEvent<int32 * IntPtr>
+    //start another window of the same program as the given tab's window; it joins that tab's group right of the tab
+    abstract member newTabRightOf : IntPtr -> unit
 
 type IGroup =
     abstract member hwnd : IntPtr
     abstract member addWindow: IntPtr * bool -> unit
     abstract member removeWindow: IntPtr -> unit
     abstract member switchWindow: bool * bool -> unit
+    //add a window as a new tab placed right of the given tab (and shown, in a split group in place of the focused side)
+    abstract member addWindowAfter: IntPtr * IntPtr -> unit
     abstract member windows: List2<IntPtr>
     abstract member destroy: unit -> unit
 

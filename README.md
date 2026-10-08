@@ -51,6 +51,9 @@ Changes on top of upstream, all in the Settings window (right-click the tray ico
   the two share changes the split, minimizing hides both, and a group dragged to a monitor with different scaling keeps
   its proportions. Clicking a tab that is not on show puts it in place of the side that has the focus; the right-click
   menu also has *Swap the two sides* and *Close split view*. Closing one of the two windows ends the split.
+- **New tab to the right.** Right-click a tab and choose *New tab to the right*: another window of the same program is
+  started and joins the group as the tab right of the one you clicked (in a split group it takes the place of the side
+  that has the focus). The new window is recognised by program, so it also works for programs that reuse one process.
 - **Grouping behaviour** (Behavior page). The tab X can close the whole group (Ctrl closes one tab), tabs can require Shift
   to be dragged, and a group can accept only windows of the same program (Shift overrides).
 

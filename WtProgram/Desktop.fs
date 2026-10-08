@@ -54,6 +54,9 @@ type GroupInfo(enableSuperBar) as this =
         this.invokeGroup <| fun() -> this.group.removeWindow(hwnd)
     member private this.destroy() = this.invokeGroup <| fun() -> this.group.destroy()
     member private x.switchWindow(next, force) = this.invokeGroup <| fun() -> this.group.switchWindow(next, force)
+    member private this.addWindowAfter(hwnd, after) =
+        windowsCell.map <| fun l -> l.append hwnd
+        this.invokeGroup <| fun() -> this.group.addNewTabAfter(hwnd, after)
 
     interface IGroup with
         member x.hwnd = this.hwnd
@@ -63,6 +66,7 @@ type GroupInfo(enableSuperBar) as this =
         member x.addWindow(hwnd, delay) = this.addWindow(hwnd, delay)
         member x.removeWindow hwnd = this.removeWindow hwnd
         member x.switchWindow(next,force) = this.switchWindow(next, force)
+        member x.addWindowAfter(hwnd, after) = this.addWindowAfter(hwnd, after)
         
 type IDesktopNotification =
     abstract member dragDrop : IntPtr -> unit

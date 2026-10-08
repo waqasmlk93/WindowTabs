@@ -722,7 +722,27 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             addedEvent.Trigger(hwnd)
             //test hook: WT_TEST_SPLIT=1 splits the first two tabs of a group as soon as there are two
             if this.windows.count = 2 && Environment.GetEnvironmentVariable("WT_TEST_SPLIT") = "1" then
-                this.invokeAsync <| fun() -> this.enterSplit(hwnd)
+                this.invokeAsync <| fun() ->
+                    //whichever of the two windows is not the active one goes beside it
+                    match zorderCell.value.tryHead with
+                    | Some(active) -> this.windows.items.tryFind((<>) active).iter(fun other -> this.enterSplit(other))
+                    | None -> ()
+            //test hook: WT_TEST_NEWTAB=1 asks for a new tab right of the second tab once the group has three windows
+            if this.windows.count = 3 && Environment.GetEnvironmentVariable("WT_TEST_NEWTAB") = "1" then
+                this.invokeAsync <| fun() ->
+                    match this.ts.lorder.tryAt(1) with
+                    | Some(Tab(second)) -> Services.program.newTabRightOf(second)
+                    | None -> ()
+
+    //a window that was started from a tab's menu: it joins as the tab right of `after` and is the one you see
+    member this.addNewTabAfter(hwnd:IntPtr, after:IntPtr) =
+        this.addWindow(hwnd, false)
+        match this.ts.lorder.tryFindIndex((=) (Tab(after))) with
+        | Some(index) -> this.ts.moveTab(Tab(hwnd), index + 1)
+        | None -> ()
+        if splitRef.Value.IsSome then
+            //in a split group the new tab takes the place of the side that has the focus rather than covering both
+            this.invokeAsync <| fun() -> this.replaceSplitPane(hwnd)
 
     member this.removeWindow(hwnd) = this.withUpdate <| fun() ->
         if this.windows.contains(hwnd) then    

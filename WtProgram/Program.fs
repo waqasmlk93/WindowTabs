@@ -43,6 +43,15 @@ type ProgramVersion(parts:List2<int>)=
     member this.isNewerThan(v2:ProgramVersion) = 
         this.compare(v2) > 0
 
+//a window of `path` that is expected to appear because a tab's menu started one; it will join `group` right of `after`
+type PendingTab = {
+    group: IGroup
+    path: string
+    after: IntPtr
+    known: Set2<IntPtr>
+    deadline: DateTime
+    }
+
 type Program() as this =
     let version = "2025.06.30"
     let isStandAlone = System.Diagnostics.Debugger.IsAttached 
@@ -71,6 +80,7 @@ type Program() as this =
     let windowNameOverride = Cell.create(Map2())
     let notifyNewVersionEvt = Event<_>()
     let launcher = Launcher()
+    let pendingTabCell = Cell.create(None : PendingTab option)
    
     let isFirstRun = settingsManager.fileExists.not
 
@@ -194,9 +204,23 @@ type Program() as this =
             ])
         handlers.tryPick(fun f -> f(window)).def(None)
 
+    //the window that a 'New tab to the right' is waiting for: same program, not there before, soon enough
+    member this.pendingTabFor(window:Window) =
+        match pendingTabCell.value with
+        | Some(p) when DateTime.Now < p.deadline && p.known.contains(window.hwnd).not && window.pid.processPath = p.path -> Some(p)
+        | _ -> None
+
     member this.addWindowToGroup(window:Window) =
+        match this.pendingTabFor(window) with
+        | Some(p) ->
+            pendingTabCell.set(None)
+            isDroppedAndAwaitingGrouping.map(fun s -> s.remove window.hwnd)
+            p.group.addWindowAfter(window.hwnd, p.after)
+        | None -> this.addWindowToAnyGroup(window)
+
+    member this.addWindowToAnyGroup(window:Window) =
         let hwnd = window.hwnd
-        let group,isNewGroup = 
+        let group,isNewGroup =  
             match this.findGroupForWindow(window) with
             | Some(group) -> (group, false)
             | None -> (Services.desktop.createGroup(Services.settings.getValue("combineIconsInTaskbar").cast<bool>()), true)
@@ -345,6 +369,20 @@ type Program() as this =
         member x.notifyNewVersion() = notifyNewVersionEvt.Trigger()
         member x.newVersion = notifyNewVersionEvt.Publish
         member x.llMouse = llMouseEvent.Publish
+
+        member x.newTabRightOf(hwnd) =
+            let path = os.windowFromHwnd(hwnd).pid.processPath
+            match this.desktop.groups.tryFind(fun g -> g.windows.any((=) hwnd)) with
+            | Some(group) when String.IsNullOrEmpty(path).not ->
+                let known = Set2(os.windowsInZorder.where(fun w -> w.pid.processPath = path).map(fun w -> w.hwnd))
+                pendingTabCell.set(Some({ group = group; path = path; after = hwnd; known = known; deadline = DateTime.Now.AddSeconds(25.0) }))
+                try
+                    let psi = Diagnostics.ProcessStartInfo(path)
+                    psi.UseShellExecute <- true
+                    Diagnostics.Process.Start(psi).ignore
+                with _ ->
+                    pendingTabCell.set(None)
+            | _ -> ()
 
     interface IDesktopNotification with
         member x.dragDrop(hwnd) =

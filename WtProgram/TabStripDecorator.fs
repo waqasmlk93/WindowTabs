@@ -187,12 +187,21 @@ type TabStripDecorator(group:WindowGroup) as this =
                     group.bb.write("autoHide", isEnabled.not)
             })
 
-        let newWindowItem = 
+        let newWindowItem =
             CmiRegular({
                 text = "New window"
                 flags = List2()
                 image = None
                 click = fun() -> Process.Start(processPath) |> ignore
+            })
+
+        //another window of the same program, added to this group as the tab right of this one
+        let newTabItem =
+            CmiRegular({
+                text = "New tab to the right"
+                flags = List2()
+                image = None
+                click = fun() -> Services.program.newTabRightOf(hwnd)
             })
 
         let combineIconsInTaskbar =
@@ -301,6 +310,7 @@ type TabStripDecorator(group:WindowGroup) as this =
 
         List2([
             Some(newWindowItem)
+            Some(newTabItem)
             Some(CmiSeparator)
             splitItems.tryAt(0).bind(id)
             splitItems.tryAt(1).bind(id)
