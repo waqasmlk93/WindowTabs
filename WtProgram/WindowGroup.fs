@@ -408,6 +408,11 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                         window.moveAsync(bounds)
                     window.setPlacementAsync(wp)   
                      
+    //Windows' maximize / minimize / restore animation of one window (DWMWA_TRANSITIONS_FORCEDISABLED)
+    member private this.setTransitions(hwnd:IntPtr, enabled:bool) =
+        try this.os.windowFromHwnd(hwnd).dwmSetAttribute DWMWINDOWATTRIBUTE.DWMWA_TRANSITIONS_FORCEDISABLED (if enabled then 0 else 1)
+        with _ -> ()
+
     member this.setTabName(hwnd,name) =
         Services.program.setWindowNameOverride(hwnd, name)
         this.setTabInfo(hwnd)
@@ -689,7 +694,10 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     member this.addWindow(hwnd, withDelay) = this.withUpdate <| fun() ->
        if this.windows.contains(hwnd).not then
             if withDelay then System.Threading.Thread.Sleep(250)
-            let window = this.os.windowFromHwnd(hwnd)                
+            let window = this.os.windowFromHwnd(hwnd)
+            //every tab is maximized, restored and moved by this group, and each of those plays Windows' own animation
+            //for that one window: a stack of ghost outlines and a different tab flashing in front. No animations.
+            this.setTransitions(hwnd, false)
             let conflateEvents = Set2(List2([WinEvent.EVENT_SYSTEM_MINIMIZESTART; WinEvent.EVENT_SYSTEM_MINIMIZEEND]))
             let window = this.os.windowFromHwnd(hwnd)
             this.setWindows(this.windows.add hwnd)
@@ -762,6 +770,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                 this.exitSplit(Some(if s.left = hwnd then s.right else s.left))
             | _ -> ()
             let window = this.os.windowFromHwnd(hwnd)
+            this.setTransitions(hwnd, true)
             this.ts.removeTab(Tab(hwnd))
             this.setWindows(this.windows.remove hwnd)
             hookCleanup.value.find(hwnd).Dispose()
@@ -790,6 +799,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     member this.destroy() =
         if isDestroyed.value.not then
             isDestroyed.set(true)
+            this.windows.items.iter(fun hwnd -> this.setTransitions(hwnd, true))
             settleTicker.Dispose()
             this.ts.destroy()
             shellHookWindow.value.iter <| fun d -> d.Dispose()
