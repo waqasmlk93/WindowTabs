@@ -52,6 +52,9 @@ type TabStripDecorator(group:WindowGroup) as this =
         group.bounds.changed.Add <| fun() ->
             this.updateTsPlacement()
 
+        //another program's look can have a different bar height
+        group.appearanceChanged.Add <| fun() -> this.updateTsPlacement()
+
         //the bar of a group with a single tab can be hidden: re-check when tabs come and go or the option changes
         group.added.Add <| fun _ -> this.updateTsPlacement()
         group.removed.Add <| fun _ -> this.updateTsPlacement()

@@ -28,6 +28,29 @@ You can download my prebuilt files from the [releases](https://github.com/leafOf
     - Right click on the notification icon at the bottom right corner.
     - Right click on the tab title.
 
+## What this fork adds
+
+Changes on top of upstream, all in the Settings window (right-click the tray icon, or run `WindowTabs.exe /settings`):
+
+- **Multi-monitor drags.** WindowTabs is now per-monitor DPI aware, so a group dragged between monitors with different
+  scaling no longer leaves tabs on screen, and a maximized group keeps its other tabs hidden for the whole drag and lands
+  maximized on the target monitor.
+- **Grouping rules** (Programs page). *Exclude sub-processes* keeps windows of processes launched by an app out of groups;
+  *Exclusion patterns...* takes one pattern per line (`*` and `?` wildcards; `chrome.exe` matches the file name, a pattern
+  with a folder matches the full path).
+- **Tab style** (Appearance page). Traditional or rounded tabs, an optional bar behind the tabs, close button always / on
+  the tab under the mouse / never.
+- **When the tab bar is visible.** Fade the bar of inactive windows (with its own opacity), collapse the bar of maximized
+  windows, collapse every bar until the mouse is over it, hide the bar of a window with a single tab, and delays and fade
+  time for all of that.
+- **A look per program.** On the Appearance page choose a program under *Look for* and give it its own tab look; *Use the
+  default look* removes it.
+- **Grouping behaviour** (Behavior page). The tab X can close the whole group (Ctrl closes one tab), tabs can require Shift
+  to be dragged, and a group can accept only windows of the same program (Shift overrides).
+
+Settings are stored in `WindowTabsSettings.txt`. If that file sits next to `WindowTabs.exe`, WindowTabs runs in portable
+mode and uses it instead of `%APPDATA%`.
+
 ## Contribution
 
 Any help is very welcome. Feel free to create issues or pull requests. If you'd like to fix issues, you can pick [any open issue](https://github.com/leafOfTree/WindowTabs/issues?q=is%3Aissue%20state%3Aopen).

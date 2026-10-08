@@ -22,6 +22,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     let flashEvent = Event<_>()
     let keyboardLLEvent = Event<Int32 * KBDLLHOOKSTRUCT>()
     let foregroundEvent = Event<_>()
+    let appearanceChangedEvent = Event<_>()
 
     let isDestroyed = Cell.create(false)
     let zorderCell = Cell.create(List2<IntPtr>())
@@ -69,10 +70,14 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         boundsExport.init()
         isForegroundExport.init()
 
-        this.ts.setTabAppearance(this.tabAppearance)
-        Services.settings.notifyValue "tabAppearance" <| fun(_) ->
+        //the look is the program's own look when it has one, so it follows the active tab of the group
+        Cell.listen <| fun() ->
+            this.refreshAppearance()
+        let onAppearanceSetting = fun(_) ->
             this.invokeAsync <| fun() ->
-                this.ts.setTabAppearance(this.tabAppearance)
+                this.refreshAppearance()
+        Services.settings.notifyValue "tabAppearance" onAppearanceSetting
+        Services.settings.notifyValue "appAppearance" onAppearanceSetting
 
         Cell.listen <| fun() ->
             this.ts.zorder <- zorderCell.value.map(Tab)
@@ -128,7 +133,19 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     member this.windows : Set2<IntPtr> = windowsCell.value
 
     
-    member this.tabAppearance = Services.settings.getValue("tabAppearance").cast<TabAppearanceInfo>()
+    member this.tabAppearance =
+        let globalAppearance = Services.settings.getValue("tabAppearance").cast<TabAppearanceInfo>()
+        if zorderCell.value.isEmpty then globalAppearance
+        else
+            let processPath = this.os.windowFromHwnd(zorderCell.value.head).pid.processPath
+            let overrides = Services.settings.getValue("appAppearance").cast<Map2<string, TabAppearanceInfo>>()
+            overrides.tryFind(processPath).def(globalAppearance)
+
+    member private this.refreshAppearance() =
+        this.ts.setTabAppearance(this.tabAppearance)
+        appearanceChangedEvent.Trigger()
+
+    member this.appearanceChanged = appearanceChangedEvent.Publish
 
     member private this.withUpdate f =
         Cell.beginUpdate()

@@ -26,6 +26,7 @@ type SettingsRec = {
     excludedPatterns : Set2<string>
     version: string
     tabAppearance: TabAppearanceInfo
+    appAppearance: Map2<string, TabAppearanceInfo>
     runAtStartup: bool
     hideInactiveTabs: bool
     enableTabbingByDefault: bool

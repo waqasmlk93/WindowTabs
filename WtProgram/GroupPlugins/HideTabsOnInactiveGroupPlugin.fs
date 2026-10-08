@@ -65,6 +65,8 @@ type HideTabsOnInactiveGroupPlugin() =
             Services.settings.notifyValue "hideInactiveTabs" onSettingChanged
             Services.settings.notifyValue "tabAppearance" onSettingChanged
             Services.settings.notifyValue "tabFadeMs" onSettingChanged
+            this.group.appearanceChanged.Add <| fun() ->
+                this.onShowCompactChanged()
             this.group.zorder.changed.Add <| fun() ->
                 this.onShowCompactChanged()
             this.group.isForeground.changed.Add <| fun() ->

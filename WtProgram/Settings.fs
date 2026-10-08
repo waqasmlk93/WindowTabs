@@ -121,6 +121,41 @@ type Settings(isStandAlone) as this =
             tabInactiveOpacity = -1
         }
 
+    //reads the saved fields of one tab appearance on top of a base appearance; fields not saved keep the base value
+    member this.readAppearance (appearanceObject:JObject) (baseAppearance:TabAppearanceInfo) =
+        appearanceObject.items.fold baseAppearance <| fun appearance (key,value) ->
+        try
+            let value =
+                let rawValue = (value :?> JValue).Value
+                let fieldType = Serialize.getFieldType (appearance.GetType()) key
+                if fieldType = typeof<Int32> then
+                    box(unbox<Int64>(rawValue).Int32)
+                elif fieldType = typeof<Color> then
+                    let colorStr = unbox<string>(rawValue)
+                    box(Color.FromRGB(Int32.Parse(colorStr, Globalization.NumberStyles.HexNumber)))
+                else
+                    failwith "UNKNOWN APPEARANCE FIELD TYPE"
+
+            Serialize.writeField appearance key value :?> TabAppearanceInfo
+        with ex ->
+            let errorMessage = "Error loading Appearance setting '" + key + "'. Using default value."
+            MessageBox.Show(errorMessage, "Appearance Setting Error", MessageBoxButtons.OK, MessageBoxIcon.Warning) |> ignore
+            appearance
+
+    member this.appearanceToJson (appearance:TabAppearanceInfo) =
+        let obj = JObject()
+        //GetProperties() does not promise declaration order, GetRecordFields() does, and the values come in that order
+        let props = FSharpType.GetRecordFields(typeof<TabAppearanceInfo>)
+        let values = FSharpValue.GetRecordFields(appearance)
+        List2(Seq.zip props values).iter <| fun (prop, value) ->
+            let key = prop.Name
+            match value with
+            | :? Color as value -> obj.setString(key, sprintf "%X" (value.ToRGB()))
+            | :? int as value -> obj.setInt64(key, int64(value))
+            | :? string as value -> obj.setString(key, value)
+            | _ -> ()
+        obj
+
     member this.update f = this.settings <- f(this.settings)
 
     member x.settings
@@ -157,25 +192,12 @@ type Settings(isStandAlone) as this =
                         tabMoveRequiresShift = settingsJson.getBool("tabMoveRequiresShift").def(false)
                         dropSameAppOnly = settingsJson.getBool("dropSameAppOnly").def(false)
                         tabAppearance =
-                            let appearanceObject = settingsJson.getObject("tabAppearance").def(JObject())
-                            appearanceObject.items.fold this.defaultTabAppearance <| fun appearance (key,value) ->
-                            try
-                                let value =
-                                    let rawValue = (value :?> JValue).Value
-                                    let fieldType = Serialize.getFieldType (appearance.GetType()) key
-                                    if fieldType = typeof<Int32> then 
-                                        box(unbox<Int64>(rawValue).Int32)
-                                    elif fieldType = typeof<Color> then 
-                                        let colorStr = unbox<string>(rawValue)
-                                        box(Color.FromRGB(Int32.Parse(colorStr, Globalization.NumberStyles.HexNumber)))
-                                    else 
-                                        failwith "UNKNOWN APPEARANCE FIELD TYPE"
-
-                                Serialize.writeField appearance key value :?> TabAppearanceInfo
-                            with ex ->
-                                let errorMessage = "Error loading Appearance setting '" + key + "'. Using default value."
-                                MessageBox.Show(errorMessage, "Appearance Setting Error", MessageBoxButtons.OK, MessageBoxIcon.Warning) |> ignore
-                                appearance 
+                            this.readAppearance (settingsJson.getObject("tabAppearance").def(JObject())) this.defaultTabAppearance
+                        //a program can have its own tab look, kept as a full snapshot of the look at the time it was set
+                        appAppearance =
+                            let globalAppearance = this.readAppearance (settingsJson.getObject("tabAppearance").def(JObject())) this.defaultTabAppearance
+                            let overrides = settingsJson.getObject("appAppearance").def(JObject())
+                            Map2(overrides.items.map(fun (path, value) -> path, this.readAppearance (value :?> JObject) globalAppearance))
                     }
                     cachedSettingsRec <- Some(settings)
                 with ex ->
@@ -214,20 +236,11 @@ type Settings(isStandAlone) as this =
             settingsJson.setStringArray("autoGroupingPaths", settings.autoGroupingPaths.items)
             settingsJson.setStringArray("excludeChildProcessesPaths", settings.excludeChildProcessesPaths.items)
             settingsJson.setStringArray("excludedPatterns", settings.excludedPatterns.items)
-            let appearanceObject =
-                let appearance = settings.tabAppearance
-                let obj = JObject()
-                let props = appearance.GetType().GetProperties()
-                let values = FSharpValue.GetRecordFields(appearance)
-                List2(Seq.zip props values).iter <| fun (prop, value) ->
-                    let key = prop.Name
-                    match value with
-                    | :? Color as value -> obj.setString(key, sprintf "%X" (value.ToRGB()))
-                    | :? int as value -> obj.setInt64(key, int64(value))
-                    | :? string as value -> obj.setString(key, value)
-                    | _ -> ()
-                obj
-            settingsJson.setObject("tabAppearance", appearanceObject)
+            settingsJson.setObject("tabAppearance", this.appearanceToJson settings.tabAppearance)
+            let appObject = JObject()
+            settings.appAppearance.items.iter <| fun (path, appearance) ->
+                appObject.setObject(path, this.appearanceToJson appearance)
+            settingsJson.setObject("appAppearance", appObject)
             this.settingsJson <- settingsJson
 
     interface ISettings with

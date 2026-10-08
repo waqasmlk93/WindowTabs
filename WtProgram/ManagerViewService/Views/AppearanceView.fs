@@ -25,6 +25,11 @@ and AppearancePropertyType =
     | SettingToggle                    //an on/off setting
     | SettingNumber of int * int       //a numeric setting with a range
     | Heading                          //section title, no editor
+    | TargetPicker                     //which program's look the page edits
+
+type AppChoice(path:string option, text:string) =
+    member this.path = path
+    override this.ToString() = text
 
 type AppearanceView() as this =
     let colorConfig key displayText = 
@@ -57,7 +62,7 @@ type AppearanceView() as this =
     //settings and headings live outside the tab appearance record
     let isAppearanceField prop =
         match prop.propertyType with
-        | Heading | SettingToggle | SettingNumber _ -> false
+        | Heading | TargetPicker | SettingToggle | SettingNumber _ -> false
         | _ -> true
         
     let resources = new ResourceManager("Properties.Resources", Assembly.GetExecutingAssembly());
@@ -69,7 +74,19 @@ type AppearanceView() as this =
         | null -> key
         | text -> text
 
+    //which program the page edits: None is the default look, used by every program that has no look of its own
+    let mutable selectedProgram : string option = None
+    let mutable refreshingTargets = false
+    let suppressApply = ref false
+    let targetCombo =
+        let combo = new ComboBox()
+        combo.DropDownStyle <- ComboBoxStyle.DropDownList
+        combo.Width <- 320
+        combo
+    let useDefaultBtn = new Button()
+
     let properties = List2([
+        { displayText="Look for"; key="targetPicker"; propertyType=TargetPicker }
         heading "Tab style"
         choiceConfig "tabStyle" "Style" ["Traditional (slanted tabs)"; "Rounded tabs"]
         toggleConfig "tabBackgroundBar" "Bar behind the tabs"
@@ -122,6 +139,23 @@ type AppearanceView() as this =
             label.Font <- font
             label
         match prop.propertyType with
+        | TargetPicker ->
+            let row = new FlowLayoutPanel()
+            row.AutoSize <- true
+            row.WrapContents <- false
+            label.Text <- "Look for:"
+            label.Margin <- Padding(0,6,6,0)
+            useDefaultBtn.Text <- "Use the default look"
+            useDefaultBtn.AutoSize <- true
+            useDefaultBtn.Font <- font
+            row.Controls.Add(label)
+            row.Controls.Add(targetCombo)
+            row.Controls.Add(useDefaultBtn)
+            panel.Controls.Add(row)
+            panel.SetRow(row, i)
+            panel.SetColumn(row, 0)
+            panel.SetColumnSpan(row, 2)
+            editors
         | Heading ->
             label.Font <- new Font(font, FontStyle.Bold)
             label.Margin <- Padding(0,10,0,0)
@@ -141,7 +175,7 @@ type AppearanceView() as this =
                 | NumberProperty(low, high) -> NumberEditor(low, high) :> IPropEditor
                 | SettingToggle -> BoolEditor() :> IPropEditor
                 | SettingNumber(low, high) -> NumberEditor(low, high) :> IPropEditor
-                | Heading -> failwith "headings have no editor"
+                | Heading | TargetPicker -> failwith "this row has no editor"
 
             editor.control.Dock <- DockStyle.Left
             editor.control.Width <- 280
@@ -155,14 +189,24 @@ type AppearanceView() as this =
             panel.SetColumn(editor.control, 1)
             editors.add prop.key editor
 
+    //loading values into the editors must not count as the user editing them
     let setEditorValues appearance =
-        properties.where(isAppearanceField).iter <| fun prop ->
-            let editor = editors.find prop.key
-            try
-                editor.value <- Serialize.readField appearance prop.key
-            with | _ ->()
+        suppressApply.Value <- true
+        try
+            properties.where(isAppearanceField).iter <| fun prop ->
+                let editor = editors.find prop.key
+                try
+                    editor.value <- Serialize.readField appearance prop.key
+                with | _ ->()
+        finally
+            suppressApply.Value <- false
 
-    let appearance = Services.program.tabAppearanceInfo
+    let overrides() = Services.settings.getValue("appAppearance").cast<Map2<string, TabAppearanceInfo>>()
+
+    let currentAppearance() =
+        match selectedProgram with
+        | Some(path) -> overrides().tryFind(path).def(Services.program.tabAppearanceInfo)
+        | None -> Services.program.tabAppearanceInfo
 
     let font = Font(resources.GetString("Font"), 9f)
 
@@ -209,10 +253,23 @@ type AppearanceView() as this =
         let btnRow = properties.length
         panel.SetRow(buttonPanel, btnRow)
         panel.SetColumn(buttonPanel, 1)
-        setEditorValues appearance
+        //programs start and stop while this window is open, so look again whenever the list is opened
+        targetCombo.DropDown.Add <| fun _ -> this.refreshTargets()
+        targetCombo.SelectedIndexChanged.Add <| fun _ ->
+            if refreshingTargets.not then
+                match targetCombo.SelectedItem with
+                | :? AppChoice as choice ->
+                    selectedProgram <- choice.path
+                    this.showCurrent()
+                | _ -> ()
+        useDefaultBtn.Click.Add <| fun _ ->
+            selectedProgram.iter <| fun path ->
+                Services.settings.setValue("appAppearance", box(overrides().remove path))
+                this.refreshTargets()
+                this.showCurrent()
         properties.iter <| fun prop ->
             match prop.propertyType with
-            | Heading -> ()
+            | Heading | TargetPicker -> ()
             | _ ->
                 let editor = editors.find prop.key
                 if isAppearanceField prop then
@@ -221,12 +278,62 @@ type AppearanceView() as this =
                     //plain settings: show the current value, write changes straight back
                     editor.value <- Services.settings.getValue(prop.key)
                     editor.changed.Add <| fun() -> Services.settings.setValue(prop.key, editor.value)
+        this.refreshTargets()
+        this.showCurrent()
+
+    //the programs to choose from: everything with a window right now, plus programs that already have their own look
+    member private this.refreshTargets() =
+        let os = OS()
+        let overridden = overrides()
+        let running =
+            try Services.program.appWindows.map(fun hwnd -> os.windowFromHwnd(hwnd).pid.processPath).list
+            with _ -> []
+        let paths =
+            (running @ overridden.keys.list)
+            |> List.filter (fun path -> String.IsNullOrEmpty(path).not)
+            |> Seq.distinct
+            |> List.ofSeq
+            |> List.sortBy (fun path -> Path.GetFileName(path).ToLower())
+        refreshingTargets <- true
+        targetCombo.Items.Clear()
+        targetCombo.Items.Add(AppChoice(None, "All programs (default look)")).ignore
+        paths |> List.iter (fun path ->
+            let text = Path.GetFileName(path) + (if overridden.contains path then "   (has its own look)" else "")
+            targetCombo.Items.Add(AppChoice(Some(path), text)).ignore)
+        let index =
+            match selectedProgram with
+            | Some(path) ->
+                match paths |> List.tryFindIndex ((=) path) with
+                | Some(found) -> found + 1
+                | None -> 0
+            | None -> 0
+        targetCombo.SelectedIndex <- index
+        refreshingTargets <- false
+        useDefaultBtn.Enabled <- (match selectedProgram with Some(path) -> overridden.contains path | None -> false)
+
+    //show the look being edited; the plain settings (visibility, timing) belong to every program, so they only
+    //make sense while the default look is selected
+    member private this.showCurrent() =
+        setEditorValues (currentAppearance())
+        let isDefault = selectedProgram.IsNone
+        properties.iter <| fun prop ->
+            match prop.propertyType with
+            | SettingToggle | SettingNumber _ -> (editors.find prop.key).control.Enabled <- isDefault
+            | _ -> ()
+        useDefaultBtn.Enabled <- (match selectedProgram with Some(path) -> overrides().contains path | None -> false)
 
     member this.applyAppearance() =
-        let appearance = properties.where(isAppearanceField).fold appearance <| fun appearance property ->
-            let value = (editors.find property.key).value
-            (Serialize.writeField appearance property.key value) :?> TabAppearanceInfo
-        Services.settings.setValue("tabAppearance", box(appearance))
+        if suppressApply.Value.not then
+            let updated = properties.where(isAppearanceField).fold (currentAppearance()) <| fun appearance property ->
+                let value = (editors.find property.key).value
+                (Serialize.writeField appearance property.key value) :?> TabAppearanceInfo
+            match selectedProgram with
+            | None ->
+                Services.settings.setValue("tabAppearance", box(updated))
+            | Some(path) ->
+                //editing a program's look gives it a look of its own
+                Services.settings.setValue("appAppearance", box(overrides().add path updated))
+                this.refreshTargets()
         
     interface ISettingsView with
         member x.key = SettingsViewType.AppearanceSettings
