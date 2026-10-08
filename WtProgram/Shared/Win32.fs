@@ -462,6 +462,29 @@ and
             bounds.height,
             true) |> ignore
 
+    //the edges you can see: GetWindowRect also covers the invisible resize borders Windows 10/11 put around a window
+    member this.visibleBounds : Rect =
+        let mutable rc = RECT()
+        if  os.isWin7OrHigher &&
+            DwmApi.DwmGetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS, &rc, Marshal.SizeOf(rc)) = 0 &&
+            rc.Right > rc.Left then
+            rc.Rect
+        else
+            this.bounds
+
+    //size and place the window so that its visible edges, not the invisible borders, are exactly `target`
+    member this.moveVisible (target:Rect) =
+        let place() =
+            let w = this.bounds
+            let v = this.visibleBounds
+            let l, t, r, b = v.left - w.left, v.top - w.top, w.right - v.right, w.bottom - v.bottom
+            WinUserApi.SetWindowPos(hwnd, IntPtr.Zero,
+                target.left - l, target.top - t, target.width + l + r, target.height + t + b,
+                SetWindowPosFlags.SWP_NOZORDER ||| SetWindowPosFlags.SWP_NOACTIVATE) |> ignore
+        place()
+        //moving onto a monitor with other scaling changes the borders, so measure again and correct once
+        if this.visibleBounds <> target then place()
+
     member this.setText text = WinUserApi.SetWindowText(hwnd, text) |> ignore
     
     member this.className = Win32Helper.GetClassName(hwnd)

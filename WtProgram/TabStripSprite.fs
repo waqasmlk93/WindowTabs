@@ -213,6 +213,8 @@ type TabStripSprite<'id> when 'id : equality = {
     captured : ('id * TabPart) option
     lorder: List2<'id>
     zorder: List2<'id>
+    //tabs shown side by side in a split group; they look active like the top tab
+    splits: List2<'id>
     size: Sz
     slide: ('id * int) option
     alignment: Bemo.TabAlignment
@@ -229,9 +231,10 @@ type TabStripSprite<'id> when 'id : equality = {
         {
             TabSprite.id = tab
             isTop =
-                match this.zorder.tryHead with
-                | Some(top) -> top = tab
-                | None -> false 
+                (match this.zorder.tryHead with
+                 | Some(top) -> top = tab
+                 | None -> false) ||
+                this.splits.any((=) tab) 
             displayInfo = this.tabs.find(tab)
             appearance = this.appearance
             size = this.tabSize

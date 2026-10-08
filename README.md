@@ -45,6 +45,12 @@ Changes on top of upstream, all in the Settings window (right-click the tray ico
   time for all of that.
 - **A look per program.** On the Appearance page choose a program under *Look for* and give it its own tab look; *Use the
   default look* removes it.
+- **Split view.** Right-click a tab and choose *Show beside the active tab* (or, on the active tab, *Split view with...*)
+  to show two tabs side by side inside the one group; the tab bar spans both and marks both as active. The pair behaves
+  as one window: moving, resizing or maximizing either side moves, resizes or maximizes the whole group, dragging the edge
+  the two share changes the split, minimizing hides both, and a group dragged to a monitor with different scaling keeps
+  its proportions. Clicking a tab that is not on show puts it in place of the side that has the focus; the right-click
+  menu also has *Swap the two sides* and *Close split view*. Closing one of the two windows ends the split.
 - **Grouping behaviour** (Behavior page). The tab X can close the whole group (Ctrl closes one tab), tabs can require Shift
   to be dragged, and a group can accept only windows of the same program (Shift overrides).
 

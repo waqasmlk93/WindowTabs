@@ -276,9 +276,34 @@ type TabStripDecorator(group:WindowGroup) as this =
                 flags = List2()
             })
 
+        //split view: show two tabs side by side inside the one group
+        let splitItems =
+            let regular text click = CmiRegular({ text = text; image = None; flags = List2(); click = fun() -> group.invokeAsync click })
+            if group.isSplit then
+                List2([
+                    Some(regular "Close split view" (fun() -> group.exitSplit(None)))
+                    Some(regular "Swap the two sides" (fun() -> group.swapSplitSides()))
+                ])
+            elif group.windows.count > 1 then
+                if group.topWindow <> hwnd then
+                    List2([Some(regular "Show beside the active tab" (fun() -> group.enterSplit(hwnd)))])
+                else
+                    let others = group.windows.items.where((<>)hwnd)
+                    List2([
+                        Some(CmiPopUp({
+                            text = "Split view with..."
+                            image = None
+                            items = others.map <| fun other ->
+                                regular (this.ts.tabInfo(Tab(other)).text) (fun() -> group.enterSplit(other))
+                        }))
+                    ])
+            else List2()
+
         List2([
             Some(newWindowItem)
             Some(CmiSeparator)
+            splitItems.tryAt(0).bind(id)
+            splitItems.tryAt(1).bind(id)
             Some(iconOnlyItem)
             Some(alignmentItem)
             Some(autoHideItem)

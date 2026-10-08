@@ -30,6 +30,7 @@ type TabStrip(monitor:ITabStripMonitor) as this =
     let locationCell = Cell.create(Pt.empty)
     let lorderCell = Cell.create(List2())
     let zorderCell = Cell.create(List2())
+    let splitCell = Cell.create(List2<Tab>())
     let visibleCell = Cell.create(false)
     let transparentCell = Cell.create(true)
     let showInsideCell = Cell.create(false)
@@ -120,6 +121,7 @@ type TabStrip(monitor:ITabStripMonitor) as this =
             captured = capturedCell.value
             lorder = lorderCell.value
             zorder = zorderCell.value
+            splits = splitCell.value
             size = this.size
             slide = this.slide
             direction = direction
@@ -300,6 +302,11 @@ type TabStrip(monitor:ITabStripMonitor) as this =
         with get() = zorderCell.value
         and set(zorder:List2<Tab>) =
             zorderCell.set(zorder.where(this.tabs.contains))
+
+    //tabs of a split group that are on show together
+    member this.splitTabs
+        with get() = splitCell.value
+        and set(tabs:List2<Tab>) = splitCell.set(tabs)
 
     member this.sprite = this.ts.sprite
             

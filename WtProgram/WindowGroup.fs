@@ -9,6 +9,12 @@ open System.Threading
 open System.Windows.Forms
 open Bemo.Win32.Forms
 
+type SplitInfo = {
+    left: IntPtr
+    right: IntPtr
+    state: SplitState
+    }
+
 type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     let Cell = CellScope(true)
     let _bb = Blackboard()
@@ -44,6 +50,12 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     //while the top window is being dragged, resized, maximized or restored the other tabs are parked off screen and
     //only placed behind it again once it has been still for a moment; they never chase it, so they are never seen
     let isParked = ref false
+    //split view: two tabs side by side in one frame (see SplitLayout.fs)
+    let splitRef : SplitInfo option ref = ref None
+    //where each tile really is after we placed it; a tile whose edges still match is not the user changing anything
+    let expectedTiles : Map<IntPtr, SplitBox> ref = ref Map.empty
+    //the window the user is moving or sizing right now
+    let driverRef = ref IntPtr.Zero
     //which tab was on top (and whether the group had the focus) when the others were parked
     let parkedTop = ref IntPtr.Zero
     let parkedWasForeground = ref false
@@ -181,11 +193,20 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             inMoveSize.value.not
             
     member private this.updatePlacements() =
-        zorderCell.value.tail.iter(this.adjustWindowPlacement)
+        if splitRef.Value.IsSome then
+            //in a split group the two tiles are laid out by layoutSplit, every other tab (even one that was just
+            //swapped out and is still first in the z-order) waits behind them at the size of the frame
+            zorderCell.value.where(fun (hwnd:IntPtr) -> this.isTile(hwnd).not).iter(this.adjustWindowPlacement)
+        else
+            zorderCell.value.tail.iter(this.adjustWindowPlacement)
 
     member private this.adjustChildWindows = fun() ->
         this.updatePlacements()
         
+    member private this.focusDriverOrTop(hwnd) =
+        if this.isTile(hwnd) then this.os.windowFromHwnd(hwnd).setForeground(false)
+        else this.makeTopWindowForeground()
+
     member private this.makeTopWindowForeground() =
         match zorderCell.value.where(isMinimized >> not).tryHead with
         | Some(top) -> 
@@ -218,7 +239,9 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         this.cancelSettle()
         if isParked.Value && inMoveSize.value.not then
             isParked := false
-            if this.os.windowFromHwnd(zorderCell.value.head).isMinimized.not then
+            if splitRef.Value.IsSome then
+                this.layoutSplit(Some(driverRef.Value))
+            elif this.os.windowFromHwnd(zorderCell.value.head).isMinimized.not then
                 this.saveTopWindowPlacement()
                 this.adjustChildWindows()
                 this.restoreTopTab()
@@ -229,8 +252,12 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         lastMotionTick := Environment.TickCount
         if settleTicker.Enabled.not then settleTicker.Start()
 
+    //park everything except the window being changed (in a split group that is either of the two tiles)
     member private this.hideChildWindows() =
-        zorderCell.value.tail.where(isMinimized >> not).iter(fun window -> this.os.windowFromHwnd(window).hideOffScreen(None))
+        let keep =
+            if splitRef.Value.IsSome && driverRef.Value <> IntPtr.Zero then driverRef.Value
+            else zorderCell.value.head
+        zorderCell.value.where(fun hwnd -> hwnd <> keep).where(isMinimized >> not).iter(fun window -> this.os.windowFromHwnd(window).hideOffScreen(None))
 
     member private this.inZorder(windows:List2<IntPtr>) = this.windows.items.sortBy(fun hwnd -> this.os.windowFromHwnd(hwnd).zorder)
 
@@ -307,7 +334,24 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
 
     member private this.isTop(hwnd) = zorderCell.value.where(isMinimized >> not).tryHead = Some(hwnd)
 
+    member private this.isTile(hwnd:IntPtr) : bool =
+        match splitRef.Value with
+        | Some(s) -> s.left = hwnd || s.right = hwnd
+        | None -> false
+
+    //a window whose size or position changes move the whole group
+    member private this.isDriver(hwnd:IntPtr) : bool = this.isTile(hwnd) || this.isTop(hwnd)
+
+    member this.isSplit = splitRef.Value.IsSome
+
+    member private this.boxOf (rect:Rect) : SplitBox = { l = rect.left; t = rect.top; r = rect.right; b = rect.bottom }
+    member private this.rectOf (box:SplitBox) = Rect(Pt(box.l, box.t), Sz(box.w, box.h))
+
     member private this.saveTopWindowPlacement() =
+        //in a split group the placement is the frame, which layoutSplit keeps up to date
+        if splitRef.Value.IsNone then this.saveSingleWindowPlacement()
+
+    member private this.saveSingleWindowPlacement() =
         let window = this.os.windowFromHwnd(zorderCell.value.head)
         if  window.isMinimized.not &&
             this.os.isOnScreen(window.bounds)
@@ -321,7 +365,20 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                 else window.bounds
             placement.set(Some(bounds, window.placement))
            
+    //a tab that is not on show in a split group waits behind the two tiles, at the size of the whole frame
+    member private this.placeBehind(hwnd) =
+        match placement.value with
+        | Some(bounds, _) ->
+            let window = this.os.windowFromHwnd(hwnd)
+            if window.isMinimized.not then
+                if window.isMaximized then window.showWindow(ShowWindowCommands.SW_SHOWNOACTIVATE)
+                window.move(bounds)
+        | None -> ()
+
     member private this.adjustWindowPlacement(hwnd) =
+        if splitRef.Value.IsSome then this.placeBehind(hwnd) else this.adjustSingleWindowPlacement(hwnd)
+
+    member private this.adjustSingleWindowPlacement(hwnd) =
         let window = this.os.windowFromHwnd(hwnd)
         if placement.value.IsSome then
             let bounds,wp = placement.value.Value
@@ -388,10 +445,159 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         inMoveSize.set(false)
         this.cancelSettle()
         isParked := false
-        this.saveTopWindowPlacement()
-        this.adjustChildWindows()
-        this.makeTopWindowForeground()
+        if splitRef.Value.IsSome then
+            this.layoutSplit(Some(driverRef.Value))
+            this.focusDriverOrTop(driverRef.Value)
+        else
+            this.saveTopWindowPlacement()
+            this.adjustChildWindows()
+            this.makeTopWindowForeground()
         this.updateIsVisible()
+
+    //-------------------------------------------------------------- split view
+
+    //tiles parked while another one is being changed, and tiles we have just placed ourselves, are not the user
+    member private this.ignoreLocationChange(hwnd:IntPtr) : bool =
+        if this.isTile(hwnd) then
+            if isParked.Value && hwnd <> driverRef.Value then true
+            else
+                let window = this.os.windowFromHwnd(hwnd)
+                window.isMinimized.not && window.isMaximized.not &&
+                    match expectedTiles.Value.TryFind(hwnd) with
+                    | Some(expected) -> SplitLayout.sameBox 2 expected (this.boxOf window.visibleBounds)
+                    | None -> false
+        else false
+
+    //Works out what the user did to the `driver` tile (nothing, moved, resized, maximized), updates the shared frame
+    //to match and puts both tiles, and the tabs waiting behind them, where they belong.
+    member private this.layoutSplit(driver:IntPtr option) =
+        match splitRef.Value with
+        | None -> ()
+        | Some(s) ->
+            let reserve = this.tabAppearance.tabHeight
+            let state =
+                match driver with
+                | Some(d) when this.isTile(d) ->
+                    let window = this.os.windowFromHwnd(d)
+                    if window.isMinimized then s.state
+                    elif window.isMaximized then
+                        //the maximize button of a tile maximizes the whole group; pressing it again restores the group
+                        let work = Mon.fromHwnd(d).map(fun mon -> this.boxOf mon.workRect)
+                        window.showWindow(ShowWindowCommands.SW_SHOWNOACTIVATE)
+                        if s.state.maximized then SplitLayout.restore s.state
+                        else
+                            match work with
+                            | Some(work) -> SplitLayout.maximize s.state work
+                            | None -> s.state
+                    else
+                        match expectedTiles.Value.TryFind(d) with
+                        | Some(expected) ->
+                            let now = this.boxOf window.visibleBounds
+                            if SplitLayout.sameBox 2 expected now then s.state
+                            elif SplitLayout.isRescale expected now then SplitLayout.rescaled s.state reserve expected now
+                            else SplitLayout.userChanged s.state reserve (if s.left = d then SplitLeft else SplitRight) expected now
+                        | None -> s.state
+                | _ -> s.state
+            let leftBox, rightBox = SplitLayout.tiles state reserve
+            let leftWindow = this.os.windowFromHwnd(s.left)
+            let rightWindow = this.os.windowFromHwnd(s.right)
+            let place (window:Window) (box:SplitBox) =
+                if window.isMinimized.not then
+                    if window.isMaximized then window.showWindow(ShowWindowCommands.SW_SHOWNOACTIVATE)
+                    window.moveVisible(this.rectOf box)
+            place leftWindow leftBox
+            place rightWindow rightBox
+            //what we really got: a window with a minimum size does not become smaller just because we asked
+            expectedTiles :=
+                [
+                    (if leftWindow.isMinimized then None else Some(s.left, this.boxOf leftWindow.visibleBounds))
+                    (if rightWindow.isMinimized then None else Some(s.right, this.boxOf rightWindow.visibleBounds))
+                ] |> List.choose id |> Map.ofList
+            splitRef := Some({ s with state = state })
+            if leftWindow.isMinimized.not && rightWindow.isMinimized.not then
+                //the frame the other tabs follow and the tab bar sits above
+                let union = leftWindow.bounds.union(rightWindow.bounds)
+                placement.set(Some(union, { leftWindow.placement with showCmd = ShowWindowCommands.SW_SHOWNORMAL; rcNormalPosition = union }))
+                this.updatePlacements()
+                rightWindow.insertAfter(WindowHandleTypes.HWND_TOP)
+                leftWindow.insertAfter(WindowHandleTypes.HWND_TOP)
+            this.saveZorder()
+            //the tiles are never maximized windows, so the bar keeps its own row instead of collapsing over a title bar
+            isMaximizedExport.update()
+            this.updateIsVisible()
+
+    //show `partner` beside the active tab
+    member this.enterSplit(partner:IntPtr) =
+        if splitRef.Value.IsNone && this.windows.contains(partner) && this.windows.count > 1 then
+            this.settleNow()
+            match zorderCell.value.where(isMinimized >> not).tryHead with
+            | Some(left) when left <> partner ->
+                let leftWindow = this.os.windowFromHwnd(left)
+                let state =
+                    if leftWindow.isMaximized then
+                        let work = Mon.fromHwnd(left).map(fun mon -> this.boxOf mon.workRect).def(this.boxOf leftWindow.visibleBounds)
+                        SplitLayout.maximize (SplitLayout.create (this.boxOf leftWindow.placement.rcNormalPosition)) work
+                    else SplitLayout.create (this.boxOf leftWindow.visibleBounds)
+                splitRef := Some({ left = left; right = partner; state = state })
+                expectedTiles := Map.empty
+                this.ts.splitTabs <- List2([Tab(left); Tab(partner)])
+                this.layoutSplit(None)
+                leftWindow.setForeground(false)
+            | _ -> ()
+
+    //end the split: one tab (the one with the focus unless told otherwise) takes the whole frame again
+    member this.exitSplit(keep:IntPtr option) =
+        match splitRef.Value with
+        | None -> ()
+        | Some(s) ->
+            this.settleNow()
+            let active =
+                match keep with
+                | Some(hwnd) -> hwnd
+                | None -> if this.os.foreground.hwnd = s.right then s.right else s.left
+            let reserve = this.tabAppearance.tabHeight
+            splitRef := None
+            expectedTiles := Map.empty
+            this.ts.splitTabs <- List2()
+            let window = this.os.windowFromHwnd(active)
+            if window.isMinimized.not then
+                if s.state.maximized then
+                    //remember the normal size as its restore size, then maximize
+                    window.moveVisible(this.rectOf (SplitLayout.tileArea { s.state with maximized = false; frame = s.state.normalFrame } 0))
+                    window.showWindow(ShowWindowCommands.SW_SHOWMAXIMIZED)
+                else
+                    window.moveVisible(this.rectOf (SplitLayout.tileArea s.state reserve))
+                window.insertAfter(WindowHandleTypes.HWND_TOP)
+                window.setForeground(false)
+            this.saveZorder()
+            this.saveTopWindowPlacement()
+            this.adjustChildWindows()
+            isMaximizedExport.update()
+            this.updateIsVisible()
+
+    //swap the two sides
+    member this.swapSplitSides() =
+        match splitRef.Value with
+        | Some(s) ->
+            splitRef := Some({ s with left = s.right; right = s.left })
+            this.ts.splitTabs <- List2([Tab(s.right); Tab(s.left)])
+            expectedTiles := Map.empty
+            this.layoutSplit(None)
+        | None -> ()
+
+    member private this.replaceSplitPane(newHwnd:IntPtr) =
+        match splitRef.Value with
+        | Some(s) when s.left <> newHwnd && s.right <> newHwnd ->
+            let replaceRight = this.os.foreground.hwnd = s.right
+            let updated = if replaceRight then { s with right = newHwnd } else { s with left = newHwnd }
+            splitRef := Some(updated)
+            expectedTiles := Map.empty
+            this.ts.splitTabs <- List2([Tab(updated.left); Tab(updated.right)])
+            let window = this.os.windowFromHwnd(newHwnd)
+            if window.isMinimized then window.showWindow(ShowWindowCommands.SW_SHOWNOACTIVATE)
+            this.layoutSplit(None)
+            window.setForeground(false)
+        | _ -> ()
 
     member this.main(hwnd, evt) = this.invokeAsync <| fun() -> this.mainBody(hwnd, evt)
 
@@ -418,9 +624,10 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             if this.windows.contains(hwnd) then
                 let needsRestore = zorderCell.value.any <| fun hwnd -> 
                     this.os.windowFromHwnd(hwnd).isMinimized
-                if needsRestore then  
+                if needsRestore then
                     this.restoreAll()
                     this.os.setZorder(zorderCell.value.moveToEnd((=)hwnd))
+                    if splitRef.Value.IsSome then this.layoutSplit(None)
                 this.updateIsVisible()      
                 //foreground status may have changed
                 this.foreground <- this.os.foreground.hwnd
@@ -433,11 +640,13 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                 then
                 this.setTabInfo hwnd
         | WinEvent.EVENT_SYSTEM_MOVESIZESTART ->
-            if this.isTop(hwnd) then
+            if this.isDriver(hwnd) then
+                driverRef := hwnd
                 this.onEnterMoveSize()
 
         | WinEvent.EVENT_SYSTEM_MOVESIZEEND ->
-            if this.isTop(hwnd) then 
+            if this.isDriver(hwnd) then
+                driverRef := hwnd
                 this.onExitMoveSize()
 
         //this is here to detect transitions between maximized and
@@ -446,7 +655,8 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         //event when they loose focus, we don't want to automatically give them focus in this case
         //so make sure that the window HAD focus before reapplying it
         | WinEvent.EVENT_OBJECT_LOCATIONCHANGE ->
-            if this.isTop(hwnd) && inMoveSize.value.not then
+            if this.isDriver(hwnd) && inMoveSize.value.not && this.ignoreLocationChange(hwnd).not then
+                driverRef := hwnd
                 //hide the other tabs before doing anything slower, every millisecond they stay visible is seen
                 this.parkChildren()
                 //you can miss EVENT_SYSTEM_MOVESIZESTART events
@@ -462,7 +672,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                     this.saveTopWindowPlacement()
                     this.touchMotion()
                     if isForeground then
-                        this.makeTopWindowForeground()
+                        this.focusDriverOrTop(hwnd)
                     this.foreground <- this.os.foreground.hwnd
                     isMaximizedExport.update()
         | WinEvent.EVENT_SYSTEM_FOREGROUND ->
@@ -510,6 +720,9 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             this.ts.addTab(Tab(hwnd))
             this.adjustWindowPlacement(hwnd)
             addedEvent.Trigger(hwnd)
+            //test hook: WT_TEST_SPLIT=1 splits the first two tabs of a group as soon as there are two
+            if this.windows.count = 2 && Environment.GetEnvironmentVariable("WT_TEST_SPLIT") = "1" then
+                this.invokeAsync <| fun() -> this.enterSplit(hwnd)
 
     member this.removeWindow(hwnd) = this.withUpdate <| fun() ->
         if this.windows.contains(hwnd) then    
@@ -517,6 +730,11 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             //into another chrome group, need to exit the move/size and restore windows on screen in this case
             if inMoveSize.value then
                 this.onExitMoveSize()
+            //closing or moving away one of the two tiles ends the split; the other tab takes the whole frame
+            match splitRef.Value with
+            | Some(s) when s.left = hwnd || s.right = hwnd ->
+                this.exitSplit(Some(if s.left = hwnd then s.right else s.left))
+            | _ -> ()
             let window = this.os.windowFromHwnd(hwnd)
             this.ts.removeTab(Tab(hwnd))
             this.setWindows(this.windows.remove hwnd)
@@ -578,9 +796,13 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     member this.tabActivate(Tab(hwnd), force) =
         //activating a tab while the others are still parked would show it where it was parked
         this.settleNow()
-        let window = this.os.windowFromHwnd(hwnd)
-        window.setForegroundOrRestore(force)
-        window.bringToTop()
+        if splitRef.Value.IsSome && this.isTile(hwnd).not then
+            //a tab that is not on show takes the place of the tile that has the focus
+            this.replaceSplitPane(hwnd)
+        else
+            let window = this.os.windowFromHwnd(hwnd)
+            window.setForegroundOrRestore(force)
+            window.bringToTop()
 
     member this.onTabMoved(hwnd, index) = movedEvent.Trigger(hwnd, index)
 
