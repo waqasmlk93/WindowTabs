@@ -84,12 +84,14 @@ type TabStripDecorator(group:WindowGroup) as this =
     member private this.updateTsSlide() =
         this.ts.slide <- this.tabSlide
 
-    member private this.updateTsPlacement() = 
+    member private this.updateTsPlacement() =
+      try
         let dock = Services.settings.getValue("dockTabBar").cast<bool>()
         //with the docked bar a window without other tabs keeps a thin bar that opens when the mouse is over it
         let hideSingle = dock.not && Services.settings.getValue("hideSingleTab").cast<bool>() && this.ts.tabs.count <= 1
         //docked bar: nothing is drawn over a window that has no other tab, except while the mouse is at its top edge
-        let lonelyHidden = dock && this.ts.tabs.count <= 1 && edgeHoverCell.value.not && this.ts.isMouseOver.value.not
+        //(while a tab is being dragged every bar is shown, they are where the tab can be dropped to join a group)
+        let lonelyHidden = dock && this.ts.tabs.count <= 1 && edgeHoverCell.value.not && this.ts.isMouseOver.value.not && isDraggingCell.value.not
         this.ts.suppressed <- lonelyHidden
         if group.bounds.value.IsNone || hideSingle then
             this.ts.visible <- false
@@ -113,6 +115,7 @@ type TabStripDecorator(group:WindowGroup) as this =
                 else
                     this.ts.setPlacement(normal)
             this.ts.visible <- true
+      with ex -> ExceptionLog.write "updateTsPlacement" ex
 
     //watches the mouse: over the top edge of a window that has no other tab the bar opens (a timer, because there is no
     //window there to receive the mouse, so nothing sits over the title bar and blocks clicks)
@@ -509,6 +512,7 @@ type TabStripDecorator(group:WindowGroup) as this =
             this.invokeAsync <| fun() -> 
                 isDraggingCell.value <- true
                 this.ts.transparent <- false
+                this.updateTsPlacement()
                 
         member this.dragEnter dragInfo pt =
             this.invokeSync <| fun() -> 
@@ -564,6 +568,7 @@ type TabStripDecorator(group:WindowGroup) as this =
             this.invokeAsync <| fun() ->
                 isDraggingCell.value <- false
                 this.ts.transparent <- true
+                this.updateTsPlacement()
                 match this.ts.movedTab with
                 | Some(tab, index) ->
                     this.ts.moveTab(tab, index)

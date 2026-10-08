@@ -72,6 +72,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Shared/Operators.fs" />
+    <Compile Include="Shared/ExceptionLog.fs" />
     <Compile Include="Shared/Dynamic.fs" />
     <Compile Include="Shared/Observable.fs" />
     <Compile Include="Shared/Blackboard.fs" />

@@ -90,12 +90,16 @@ type Program() as this =
         settingsManager.update <| fun s -> { s with version = version }
         original 
 
+    //a second copy of WindowTabs shows a message and exits; window events that arrive meanwhile must be ignored
+    let isReady = ref false
+
     let registerShellHooks =
         os.registerShellHooks <| fun (hwnd, shellEvent) ->
-            match shellEvent with
-            | ShellEvent.HSHELL_WINDOWCREATED -> this.receive(ShellEvent(hwnd, shellEvent))
-            | ShellEvent.HSHELL_WINDOWDESTROYED -> this.receive(ShellEvent(hwnd, shellEvent))
-            | _ -> ()
+            if isReady.Value then
+              match shellEvent with
+              | ShellEvent.HSHELL_WINDOWCREATED -> this.receive(ShellEvent(hwnd, shellEvent))
+              | ShellEvent.HSHELL_WINDOWDESTROYED -> this.receive(ShellEvent(hwnd, shellEvent))
+              | _ -> ()
 
 
     let hotKeyInfo = Map2(List2([
@@ -404,6 +408,7 @@ type Program() as this =
         Services.register(FilterService() :> IFilterService)
         Services.register(ManagerViewService() :> IManagerView)
         Services.program.refresh()
+        isReady := true
 
         plugins.iter <| fun p -> p.init()
 

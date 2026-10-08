@@ -158,7 +158,10 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         let hwnd = Win32Helper.GetTopLevelWindowFromPoint(pt.Point)
         this.ts.hwnd = hwnd || this.windows.contains(hwnd)
     
-    member this.topWindow = zorderCell.value.head
+    //the tab on top, or zero when the group has no tabs (a group is empty for a moment when its last tab is dragged away)
+    member this.topWindow = match zorderCell.value.tryHead with Some(hwnd) -> hwnd | None -> IntPtr.Zero
+
+    member private this.hasTop = this.windows.count > 0 && zorderCell.value.isEmpty.not
    
 
     member this.windows : Set2<IntPtr> = windowsCell.value
@@ -259,7 +262,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     //raising tabs can leave it under the top window, which hides it completely (maximized) or cuts it in half behind
     //whatever window is above (restored). Put it back right above the top tab.
     member private this.raiseStrip() =
-        if this.isEmpty.not then
+        if this.hasTop then
             let top = this.os.windowFromHwnd(zorderCell.value.head)
             if top.isMinimized.not then
                 let strip = this.os.windowFromHwnd(this.ts.hwnd)
@@ -282,7 +285,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
 
     //the row at the top of the work area that a maximized top window leaves to the bar
     member this.dockRow : Rect option =
-        if this.dockWanted && this.isEmpty.not then
+        if this.dockWanted && this.hasTop then
             let top = this.os.windowFromHwnd(zorderCell.value.head)
             if top.isMinimized.not && top.isMaximized then
                 Mon.fromHwnd(top.hwnd).map(fun mon ->
@@ -326,7 +329,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
 
     //the same for the tabs behind the top one, which are placed (maximized) by their own apps a moment later
     member private this.dockLayout() =
-        if (this.dockWanted || dockActive.Value) && this.isEmpty.not then
+        if (this.dockWanted || dockActive.Value) && this.hasTop then
             let top = this.os.windowFromHwnd(zorderCell.value.head)
             if top.isMinimized.not && top.isMaximized then
                 this.dockWindow(top.hwnd)
@@ -352,7 +355,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
 
     //a restored window leaves the bar room above it, if there is none the window is moved down
     member private this.ensureDockRoom() =
-        if this.dockWanted && this.isEmpty.not && splitRef.Value.IsNone then
+        if this.dockWanted && this.hasTop && splitRef.Value.IsNone then
             let top = this.os.windowFromHwnd(zorderCell.value.head)
             if top.isMinimized.not && top.isMaximized.not then
                 match Mon.fromHwnd(top.hwnd) with
@@ -990,7 +993,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         else
             let window = this.os.windowFromHwnd(hwnd)
             //docked bar: the tab about to be shown must already be maximized and clear of the bar's row
-            if this.dockWanted && window.isMinimized.not && this.os.windowFromHwnd(zorderCell.value.head).isMaximized then
+            if this.dockWanted && this.hasTop && window.isMinimized.not && this.os.windowFromHwnd(zorderCell.value.head).isMaximized then
                 (match placement.value with
                  | Some(_, wp) when window.isMaximized.not && wp.showCmd = ShowWindowCommands.SW_SHOWMAXIMIZED -> window.setPlacement(wp)
                  | _ -> ())
