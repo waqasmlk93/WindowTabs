@@ -73,6 +73,10 @@ type Settings(isStandAlone) as this =
             tabHeightOffset = 1
             tabIndentFlipped = 80
             tabIndentNormal = 3 
+            tabStyle = 0
+            tabCloseButton = 0
+            tabBackgroundBar = 0
+            tabInactiveOpacity = 38
         }
  
     member this.darkModeTabAppearance =
@@ -90,6 +94,10 @@ type Settings(isStandAlone) as this =
             tabHeightOffset = -1
             tabIndentFlipped = -1
             tabIndentNormal = -1
+            tabStyle = -1
+            tabCloseButton = -1
+            tabBackgroundBar = -1
+            tabInactiveOpacity = -1
         }
 
     member this.darkModeBlueTabAppearance =
@@ -107,6 +115,10 @@ type Settings(isStandAlone) as this =
             tabHeightOffset = -1
             tabIndentFlipped = -1
             tabIndentNormal = -1
+            tabStyle = -1
+            tabCloseButton = -1
+            tabBackgroundBar = -1
+            tabInactiveOpacity = -1
         }
 
     member this.update f = this.settings <- f(this.settings)
@@ -136,6 +148,14 @@ type Settings(isStandAlone) as this =
                         enableShiftScroll = settingsJson.getBool("enableShiftScroll").def(true)
                         version = settingsJson.getString("version").def(String.Empty)
                         alignment = settingsJson.getString("alignment").def("Center")
+                        alwaysHideTabs = settingsJson.getBool("alwaysHideTabs").def(false)
+                        hideSingleTab = settingsJson.getBool("hideSingleTab").def(false)
+                        tabHideDelayMs = settingsJson.getInt32("tabHideDelayMs").def(100)
+                        tabShowDelayMs = settingsJson.getInt32("tabShowDelayMs").def(0)
+                        tabFadeMs = settingsJson.getInt32("tabFadeMs").def(0)
+                        closeButtonClosesGroup = settingsJson.getBool("closeButtonClosesGroup").def(false)
+                        tabMoveRequiresShift = settingsJson.getBool("tabMoveRequiresShift").def(false)
+                        dropSameAppOnly = settingsJson.getBool("dropSameAppOnly").def(false)
                         tabAppearance =
                             let appearanceObject = settingsJson.getObject("tabAppearance").def(JObject())
                             appearanceObject.items.fold this.defaultTabAppearance <| fun appearance (key,value) ->
@@ -181,6 +201,14 @@ type Settings(isStandAlone) as this =
             settingsJson.setBool("enableHoverActivate", settings.enableHoverActivate)
             settingsJson.setBool("autoHide", settings.autoHide)
             settingsJson.setBool("enableShiftScroll", settings.enableShiftScroll)
+            settingsJson.setBool("alwaysHideTabs", settings.alwaysHideTabs)
+            settingsJson.setBool("hideSingleTab", settings.hideSingleTab)
+            settingsJson.setInt64("tabHideDelayMs", int64(settings.tabHideDelayMs))
+            settingsJson.setInt64("tabShowDelayMs", int64(settings.tabShowDelayMs))
+            settingsJson.setInt64("tabFadeMs", int64(settings.tabFadeMs))
+            settingsJson.setBool("closeButtonClosesGroup", settings.closeButtonClosesGroup)
+            settingsJson.setBool("tabMoveRequiresShift", settings.tabMoveRequiresShift)
+            settingsJson.setBool("dropSameAppOnly", settings.dropSameAppOnly)
             settingsJson.setStringArray("includedPaths", settings.includedPaths.items)
             settingsJson.setStringArray("excludedPaths", settings.excludedPaths.items)
             settingsJson.setStringArray("autoGroupingPaths", settings.autoGroupingPaths.items)

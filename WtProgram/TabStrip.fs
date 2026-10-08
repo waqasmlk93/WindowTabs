@@ -213,14 +213,19 @@ type TabStrip(monitor:ITabStripMonitor) as this =
     
     member private this.update() = 
         if this.visible then 
-            this.window.update(this.render, this.location, this.alpha)
+            let img = this.render
+            //a collapsed bar above its window must stay glued to the window edge, not to the top of the full-height bar
+            let location =
+                if this.isShrunk && this.direction = TabDirection.TabUp then this.location.add(Pt(0, max 0 (this.size.height - img.height)))
+                else this.location
+            this.window.update(img, location, this.alpha)
             GC.Collect()
         else this.window.hide()
     
     member private this.render : Img = 
         try
             let img = this.ts.render
-            if this.isShrunk && this.direction = TabDirection.TabDown then
+            if this.isShrunk then
                 img.clip(Rect(Pt(0, img.height - 7), Sz(img.width, 7)))
             else
                 img

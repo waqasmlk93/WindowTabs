@@ -76,7 +76,17 @@ type TabSprite<'id> = {
             captured = this.captured = Some(TabClose)
         } :> ISprite
        
-    member private this.edgeWidth = 18
+    member private this.isRounded = this.appearance.tabStyle = 1
+
+    member private this.edgeWidth = if this.isRounded then 8 else 18
+
+    //close button: 0 always, 1 only on the tab the mouse is over, 2 never
+    member private this.showCloseButton =
+        this.onlyIcon.not &&
+        match this.appearance.tabCloseButton with
+        | 2 -> false
+        | 1 -> this.hover.IsSome || this.captured.IsSome
+        | _ -> true
 
     member private this.renderTabEdge(path:GraphicsPath, startPoint:PointF, endPoint:PointF) =
         let width = endPoint.X - startPoint.X
@@ -119,7 +129,21 @@ type TabSprite<'id> = {
 
     member private this.borderPen = new Pen(new SolidBrush(this.appearance.tabBorderColor), 1.0f)
 
-    member private this.borderPath =
+    member private this.roundedPath =
+        let path = new GraphicsPath()
+        let d = 12
+        let x, y = 1, 1
+        let w, h = this.size.width - 3, this.size.height - 3
+        path.AddArc(x, y, d, d, 180.0f, 90.0f)
+        path.AddArc(x + w - d, y, d, d, 270.0f, 90.0f)
+        path.AddArc(x + w - d, y + h - d, d, d, 0.0f, 90.0f)
+        path.AddArc(x, y + h - d, d, d, 90.0f, 90.0f)
+        path.CloseFigure()
+        path
+
+    member private this.borderPath = if this.isRounded then this.roundedPath else this.traditionalPath
+
+    member private this.traditionalPath =
         let path = new GraphicsPath()
         let bottom,top =
             match this.direction with
@@ -148,7 +172,8 @@ type TabSprite<'id> = {
         Pt(x, 0)
 
     member this.textSize =
-        let width = this.size.width - this.textLocation.x - this.edgeWidth - this.closeButtonSize.width
+        let closeWidth = if this.showCloseButton then this.closeButtonSize.width else 0
+        let width = this.size.width - this.textLocation.x - this.edgeWidth - closeWidth
         let width = max 1 width
         Sz(width, this.size.height)
 
@@ -178,7 +203,7 @@ type TabSprite<'id> = {
         member this.children = 
             List2([
                 Some(this.iconLocation,this.iconSprite) 
-                (if this.onlyIcon then None else Some(this.closeButtonLocation, this.closeButtonSprite))
+                (if this.showCloseButton then Some(this.closeButtonLocation, this.closeButtonSprite) else None)
                 ]).choose(id)
 
 type TabStripSprite<'id> when 'id : equality = {
@@ -196,7 +221,8 @@ type TabStripSprite<'id> when 'id : equality = {
     onlyIcons: bool
     } with
 
-    member private this.tabOverlap = float(this.appearance.tabOverlap)
+    //rounded tabs are separate pills with a small gap, they don't overlap like the traditional slanted tabs
+    member private this.tabOverlap = if this.appearance.tabStyle = 1 then -3.0 else float(this.appearance.tabOverlap)
     member private this.tabMaxLen = float(this.appearance.tabMaxWidth)
 
     member private this.tabSprite (tab:'id) =
@@ -225,7 +251,8 @@ type TabStripSprite<'id> when 'id : equality = {
 
     member private this.bgImage =
         let bgColor = 
-            if this.transparent then Color.FromArgb(0, 0, 0, 0)
+            if this.appearance.tabBackgroundBar = 1 then this.appearance.tabNormalBgColor
+            elif this.transparent then Color.FromArgb(0, 0, 0, 0)
             else Color.FromArgb(1, 1, 1, 1) 
         let gr, img = 
             let sz = this.size

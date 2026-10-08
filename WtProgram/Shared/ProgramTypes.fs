@@ -37,6 +37,14 @@ type SettingsRec = {
     autoHide: bool
     enableShiftScroll: bool
     alignment: string
+    alwaysHideTabs: bool
+    hideSingleTab: bool
+    tabHideDelayMs: int
+    tabShowDelayMs: int
+    tabFadeMs: int
+    closeButtonClosesGroup: bool
+    tabMoveRequiresShift: bool
+    dropSameAppOnly: bool
     }
 
 type ILicenseManager =

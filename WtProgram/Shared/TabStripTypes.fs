@@ -56,4 +56,8 @@ and TabAppearanceInfo = {
     tabHeightOffset : int
     tabIndentFlipped : int
     tabIndentNormal : int
+    tabStyle : int
+    tabCloseButton : int
+    tabBackgroundBar : int
+    tabInactiveOpacity : int
     }

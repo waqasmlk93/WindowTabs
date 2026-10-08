@@ -52,6 +52,12 @@ type TabStripDecorator(group:WindowGroup) as this =
         group.bounds.changed.Add <| fun() ->
             this.updateTsPlacement()
 
+        //the bar of a group with a single tab can be hidden: re-check when tabs come and go or the option changes
+        group.added.Add <| fun _ -> this.updateTsPlacement()
+        group.removed.Add <| fun _ -> this.updateTsPlacement()
+        Services.settings.notifyValue "hideSingleTab" <| fun _ ->
+            this.invokeAsync <| fun() -> this.updateTsPlacement()
+
         group.exited.Add <| fun() ->
             Services.dragDrop.unregisterTarget(this.ts.hwnd)
     
@@ -64,7 +70,8 @@ type TabStripDecorator(group:WindowGroup) as this =
         this.ts.slide <- this.tabSlide
 
     member private this.updateTsPlacement() = 
-        if group.bounds.value.IsNone then
+        let hideSingle = Services.settings.getValue("hideSingleTab").cast<bool>() && this.ts.tabs.count <= 1
+        if group.bounds.value.IsNone || hideSingle then
             this.ts.visible <- false
         else
             this.ts.setPlacement(this.placement)
@@ -301,6 +308,12 @@ type TabStripDecorator(group:WindowGroup) as this =
         let autoHideCell = propCell("autoHide", isAutoHideEnabledDef)
         let contextMenuVisibleCell = propCell("contextMenuVisible", false)
         let renamingTabCell = propCell("renamingTab", false)
+        //settings that change how and when the bar collapses; bumping this cell re-runs the listener below
+        let settingsVersionCell = Cell.create(0)
+        let bump(_) = this.invokeAsync <| fun() -> settingsVersionCell.value <- settingsVersionCell.value + 1
+        Services.settings.notifyValue "alwaysHideTabs" bump
+        Services.settings.notifyValue "tabHideDelayMs" bump
+        Services.settings.notifyValue "tabShowDelayMs" bump
         let isRecentlyChangedZorderCell =
             let cell = Cell.create(false)
             let cbRef = ref None
@@ -312,19 +325,27 @@ type TabStripDecorator(group:WindowGroup) as this =
                 )
             cell
         Cell.listen <| fun() ->
+            settingsVersionCell.value.ignore
+            let alwaysHide = Services.settings.getValue("alwaysHideTabs").cast<bool>()
+            let hideDelay = max 1 (Services.settings.getValue("tabHideDelayMs").cast<int>())
+            let showDelay = max 0 (Services.settings.getValue("tabShowDelayMs").cast<int>())
+            //collapse a maximized window's bar (when auto hide is on), or every bar when 'always hide' is on
             let shrink = 
-                isMaximized.value && 
+                (alwaysHide || (isMaximized.value && autoHideCell.value)) && 
                 isMouseOver.value.not && 
                 isDraggingCell.value.not &&
-                autoHideCell.value &&
                 contextMenuVisibleCell.value.not &&
                 renamingTabCell.value.not &&
                 isRecentlyChangedZorderCell.value.not
             callbackRef.Value.iter <| fun(d:IDisposable) -> d.Dispose()
             callbackRef := None
             if shrink then
-                callbackRef := Some(ThreadHelper.cancelablePostBack 100 <| fun() ->
+                callbackRef := Some(ThreadHelper.cancelablePostBack hideDelay <| fun() ->
                     this.ts.isShrunk <- true
+                )
+            elif showDelay > 0 && this.ts.isShrunk then
+                callbackRef := Some(ThreadHelper.cancelablePostBack showDelay <| fun() ->
+                    this.ts.isShrunk <- false
                 )
             else
                 this.ts.isShrunk <- false
@@ -342,7 +363,9 @@ type TabStripDecorator(group:WindowGroup) as this =
                     os.windowFromHwnd(group.topWindow).setForeground(false)
                 | MouseLeft ->
                     group.tabActivate(tab, false)
-                    if part <> TabClose then
+                    let shiftHeld = (Control.ModifierKeys &&& Keys.Shift) = Keys.Shift
+                    let canMove = Services.settings.getValue("tabMoveRequiresShift").cast<bool>().not || shiftHeld
+                    if part <> TabClose && canMove then
                         let dragOffset = pt.sub(this.ts.tabLocation tab)
                         let dragImage = fun() -> this.ts.dragImage(tab)
                         let dragInfo = box({ tab = tab; tabOffset = dragOffset; tabInfo = this.ts.tabInfo(tab)})
@@ -358,7 +381,12 @@ type TabStripDecorator(group:WindowGroup) as this =
             group.onTabMoved(hwnd, index)
 
         member x.tabClose(Tab(hwnd)) =
-            os.windowFromHwnd(hwnd).close()
+            //optionally the close button closes the whole group; holding Ctrl closes just this tab
+            let ctrlHeld = (Control.ModifierKeys &&& Keys.Control) = Keys.Control
+            if Services.settings.getValue("closeButtonClosesGroup").cast<bool>() && ctrlHeld.not then
+                this.onCloseAllWindows()
+            else
+                os.windowFromHwnd(hwnd).close()
 
         member x.windowMsg(msg) = 
             ()
@@ -373,8 +401,18 @@ type TabStripDecorator(group:WindowGroup) as this =
             this.invokeSync <| fun() -> 
                 let dragInfo = dragInfo :?> TabDragInfo
                 let (Tab(hwnd)) = dragInfo.tab
+                //optionally only windows of the same program may join a group, unless Shift is held
+                let allowed =
+                    let shiftHeld = (Control.ModifierKeys &&& Keys.Shift) = Keys.Shift
+                    if Services.settings.getValue("dropSameAppOnly").cast<bool>().not || shiftHeld then true
+                    else
+                        let path = os.windowFromHwnd(hwnd).pid.processPath
+                        group.windows.count = 0 ||
+                        group.windows.items.any(fun other -> os.windowFromHwnd(other).pid.processPath = path)
                 let result = 
-                    if this.ts.tabs.contains(dragInfo.tab) &&
+                    if allowed.not then
+                        false
+                    elif this.ts.tabs.contains(dragInfo.tab) &&
                         this.ts.tabs.count = 1 then
                         dragPtCell.set(pt)
                         dragInfoCell.set(Some(dragInfo))
