@@ -467,6 +467,8 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         inMoveSize.set(true)
         this.cancelSettle()
         this.parkChildren()
+        //dragging a maximized window restores it: the bar must stop being the collapsed one of a maximized window
+        isMaximizedExport.update()
         this.updateIsVisible()
 
     member this.onExitMoveSize() =
@@ -480,6 +482,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             this.saveTopWindowPlacement()
             this.adjustChildWindows()
             this.makeTopWindowForeground()
+        isMaximizedExport.update()
         this.raiseStrip()
         this.updateIsVisible()
 
