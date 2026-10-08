@@ -270,7 +270,19 @@ type TabStripSprite<'id> when 'id : equality = {
                 do gr.SmoothingMode <- SmoothingMode.AntiAlias
                 (gr, bmp)   
         let bounds = Rect(Pt(), this.size)
-        do  gr.FillRectangle(new SolidBrush(bgColor), bounds.Rectangle)
+        if this.appearance.tabStyle = 1 && bgColor.A > 1uy && bounds.width > 20 && bounds.height > 12 then
+            //rounded top corners, like the corners of a Windows 11 window
+            let r = 8
+            let rc = bounds.Rectangle
+            use path = new GraphicsPath()
+            path.AddArc(rc.Left, rc.Top, 2 * r, 2 * r, 180.0f, 90.0f)
+            path.AddArc(rc.Right - 2 * r - 1, rc.Top, 2 * r, 2 * r, 270.0f, 90.0f)
+            path.AddLine(rc.Right - 1, rc.Top + r, rc.Right - 1, rc.Bottom)
+            path.AddLine(rc.Right - 1, rc.Bottom, rc.Left, rc.Bottom)
+            path.CloseFigure()
+            do  gr.FillPath(new SolidBrush(bgColor), path)
+        else
+            do  gr.FillRectangle(new SolidBrush(bgColor), bounds.Rectangle)
         img.img
 
     member private this.tabLengthWithOverlap tabOverlap =

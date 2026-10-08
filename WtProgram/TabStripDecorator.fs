@@ -98,10 +98,9 @@ type TabStripDecorator(group:WindowGroup) as this =
             match group.dockRow with
             | Some(row) ->
                 //a maximized window has been made smaller to leave this row: the bar is full width and has its own place
-                let indent = group.tabAppearance.tabIndentNormal
                 this.ts.setPlacement({
                     showInside = false
-                    bounds = Rect(Pt(row.x + indent, row.y), Sz(row.width - 2 * indent, row.height))
+                    bounds = row
                 })
             | None ->
                 this.ts.setPlacement(this.placement)

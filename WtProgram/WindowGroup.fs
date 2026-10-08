@@ -339,6 +339,13 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                     zorderCell.value.tail.where(fun hwnd -> this.os.windowFromHwnd(hwnd).isMinimized.not).iter <| fun hwnd ->
                         let sibling = this.os.windowFromHwnd(hwnd)
                         if sibling.isMaximized.not || this.dockClose(sibling.visibleBounds, target).not then
+                            //a tab behind that is not maximized yet (its own request was lost or is still waiting) is
+                            //maximized first: sized as an ordinary window it would sit above the bar once it is shown
+                            if sibling.isMaximized.not then
+                                match placement.value with
+                                | Some(_, wp) when wp.showCmd = ShowWindowCommands.SW_SHOWMAXIMIZED ->
+                                    sibling.setPlacementAsync(wp)
+                                | _ -> ()
                             sibling.moveAsync(rect)
                 | _ -> ()
                 if this.dockWanted.not then dockActive := false
@@ -982,6 +989,12 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             this.replaceSplitPane(hwnd)
         else
             let window = this.os.windowFromHwnd(hwnd)
+            //docked bar: the tab about to be shown must already be maximized and clear of the bar's row
+            if this.dockWanted && window.isMinimized.not && this.os.windowFromHwnd(zorderCell.value.head).isMaximized then
+                (match placement.value with
+                 | Some(_, wp) when window.isMaximized.not && wp.showCmd = ShowWindowCommands.SW_SHOWMAXIMIZED -> window.setPlacement(wp)
+                 | _ -> ())
+                this.dockWindow(hwnd)
             window.setForegroundOrRestore(force)
             window.bringToTop()
 
