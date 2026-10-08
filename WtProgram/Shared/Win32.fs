@@ -564,6 +564,15 @@ and Pid(pid:int) =
 
     member this.exeName = Path.GetFileName(this.processPath).ToLower()
 
+    //paths of the processes that (transitively) launched this one, nearest first. Best effort: a parent that has
+    //already exited ends the chain, and the depth is bounded in case a process id was reused into a cycle
+    member this.ancestorPaths : string list = Cell.cacheProp this <| fun() ->
+        let rec walk pid depth acc =
+            let parent = if depth >= 16 then 0 else Win32Helper.GetParentProcessId(pid)
+            if parent <= 4 || parent = pid then List.rev acc
+            else walk parent (depth + 1) (Pid(parent).processPath :: acc)
+        walk this.pid 0 []
+
 and Win32Message = {
     hwnd : IntPtr
     msg : int

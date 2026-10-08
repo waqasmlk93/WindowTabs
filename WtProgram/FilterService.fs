@@ -1,5 +1,17 @@
 ﻿namespace Bemo
 open System
+open System.Text.RegularExpressions
+
+module ExclusionRules =
+    //'*' and '?' wildcards, case-insensitive. A pattern containing a path separator is matched against the full
+    //process path, anything else against the exe file name only (so 'chrome.exe' or 'ms-*.exe' just work)
+    let matches (pattern:string) (processPath:string) =
+        let pattern = pattern.Trim()
+        if pattern.Length = 0 || String.IsNullOrEmpty(processPath) then false
+        else
+            let text = if pattern.Contains("\\") || pattern.Contains("/") then processPath else System.IO.Path.GetFileName(processPath)
+            let regex = "^" + Regex.Escape(pattern.Replace('/', '\\')).Replace("\\*", ".*").Replace("\\?", ".") + "$"
+            Regex.IsMatch(text.Replace('/', '\\'), regex, RegexOptions.IgnoreCase)
 
 type FilterService() as this =
     let os = OS()
@@ -68,8 +80,32 @@ type FilterService() as this =
         else
             this.includedPaths.contains(processPath)
 
+    member this.excludeChildProcessesPaths
+        with get() = Services.settings.getValue("excludeChildProcessesPaths").cast<Set2<string>>()
+        and set(value) = Services.settings.setValue("excludeChildProcessesPaths", box(value))
+
+    member this.excludedPatterns
+        with get() = Services.settings.getValue("excludedPatterns").cast<Set2<string>>()
+        and set(value) = Services.settings.setValue("excludedPatterns", box(value))
+
+    member private this.isSamePath (a:string) (b:string) = String.Equals(a, b, StringComparison.OrdinalIgnoreCase)
+
+    //windows an app's own rules keep out of groups: the exclusion patterns, and windows of processes that were
+    //launched (directly or not) by an app that has 'exclude sub-processes' switched on. The launching app's own
+    //windows are not affected.
+    member this.isExcludedByRules(window:Window) =
+        let processPath = window.pid.processPath
+        let patterns = this.excludedPatterns
+        let byPattern = patterns.count > 0 && patterns.items.any(fun pattern -> ExclusionRules.matches pattern processPath)
+        let parents = this.excludeChildProcessesPaths
+        byPattern ||
+            (parents.count > 0 &&
+                window.pid.ancestorPaths |> List.exists(fun ancestor -> parents.items.any(fun parent -> this.isSamePath parent ancestor)))
+
     member this.isTabbableWindow(window:Window) = 
-        this.getIsTabbingEnabledForProcess(window.pid.processPath) && this.isAppWindow(window)
+        this.getIsTabbingEnabledForProcess(window.pid.processPath) &&
+        this.isAppWindow(window) &&
+        this.isExcludedByRules(window).not
 
     interface IFilterService with
         
@@ -107,4 +143,19 @@ type FilterService() as this =
 
         member x.getIsTabbingEnabledForProcess(processPath) = 
             this.getIsTabbingEnabledForProcess(processPath)
+
+        member x.getExcludeChildProcesses(processPath) =
+            this.excludeChildProcessesPaths.items.any(fun p -> this.isSamePath p processPath)
+
+        member x.setExcludeChildProcesses processPath excluded =
+            this.excludeChildProcessesPaths <-
+                if excluded then this.excludeChildProcessesPaths.add processPath
+                else this.excludeChildProcessesPaths.remove processPath
+            Services.program.refresh().ignore
+
+        member x.excludedPatterns
+            with get() = this.excludedPatterns
+            and set(value) =
+                this.excludedPatterns <- value
+                Services.program.refresh().ignore
 

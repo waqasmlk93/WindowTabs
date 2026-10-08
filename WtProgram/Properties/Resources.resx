@@ -153,6 +153,18 @@
   <data name="enableAutoGrouping" xml:space="preserve">
     <value>Auto Grouping</value>
   </data>
+  <data name="excludeChildProcesses" xml:space="preserve">
+    <value>Exclude sub-processes</value>
+  </data>
+  <data name="ExcludePatterns" xml:space="preserve">
+    <value>Exclusion patterns...</value>
+  </data>
+  <data name="ExcludePatternsTitle" xml:space="preserve">
+    <value>Exclusion patterns</value>
+  </data>
+  <data name="ExcludePatternsHelp" xml:space="preserve">
+    <value>Windows of any program matching a line below are never grouped. One pattern per line. * and ? are wildcards. A name like chrome.exe or ms-*.exe matches the program file name; a pattern with a folder, like C:\Program Files\Foo\*, matches the full path.</value>
+  </data>
   <data name="enableTabs" xml:space="preserve">
     <value>Tabs</value>
   </data>

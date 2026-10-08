@@ -26,6 +26,7 @@ type ExeNode(procPath) =
         ImgHelper.imgFromIcon (Ico.fromHandle(procIcon).def(System.Drawing.SystemIcons.Application))
     let mutable _enableTabs = Services.filter.getIsTabbingEnabledForProcess(procPath)
     let mutable _enableAutoGrouping = Services.program.getAutoGroupingEnabled(procPath)
+    let mutable _excludeChildProcesses = Services.filter.getExcludeChildProcesses(procPath)
     member this.Icon with get() = icon 
     member this.enableTabs 
         with get() = _enableTabs 
@@ -38,6 +39,13 @@ type ExeNode(procPath) =
             _enableAutoGrouping <- newValue
             Services.program.setAutoGroupingEnabled procPath _enableAutoGrouping
            
+    //windows of processes this app launched are kept out of groups
+    member this.excludeChildProcesses
+        with get() = _excludeChildProcesses
+        and set(newValue) =
+            _excludeChildProcesses <- newValue
+            Services.filter.setExcludeChildProcesses procPath _excludeChildProcesses
+
     interface INode with
         member x.showSettings = true
 
@@ -60,7 +68,12 @@ type ProgramView() as this=
             let btn = ToolStripButton(resources.GetString("Refresh"))
             btn.Click.Add <| fun _ -> this.populateNodes()
             btn
+        let patternsBtn =
+            let btn = ToolStripButton(resources.GetString("ExcludePatterns"))
+            btn.Click.Add <| fun _ -> this.editExcludedPatterns()
+            btn
         ts.Items.Add(refreshBtn).ignore
+        ts.Items.Add(patternsBtn).ignore
         ts.Font <- font
         ts
     let statusBar = 
@@ -96,6 +109,7 @@ type ProgramView() as this=
                 control)
         addCheckBoxColumn "Tabs" "enableTabs"
         addCheckBoxColumn "Auto Grouping" "enableAutoGrouping"
+        addCheckBoxColumn "Sub-processes" "excludeChildProcesses"
         tree.NodeControls.Add(
             let control = NodeControls.NodeIcon()
             control.ParentColumn <- nameColumn
@@ -126,6 +140,53 @@ type ProgramView() as this=
         this.populateNodes()
         Services.settings.notifyValue "enableTabbingByDefault" <| fun(_) ->
             this.populateNodes()
+
+    member private this.editExcludedPatterns() =
+        let form = new Form()
+        form.Text <- resources.GetString("ExcludePatternsTitle")
+        form.Font <- font
+        form.StartPosition <- FormStartPosition.CenterParent
+        form.ClientSize <- Size(520, 360)
+        form.MinimizeBox <- false
+        form.MaximizeBox <- false
+        form.FormBorderStyle <- FormBorderStyle.FixedDialog
+        let help = Label()
+        help.Text <- resources.GetString("ExcludePatternsHelp")
+        help.Dock <- DockStyle.Top
+        help.Height <- 74
+        help.Padding <- Padding(8, 8, 8, 0)
+        let box = new TextBox()
+        box.Multiline <- true
+        box.AcceptsReturn <- true
+        box.ScrollBars <- ScrollBars.Vertical
+        box.Dock <- DockStyle.Fill
+        box.Text <- String.Join(Environment.NewLine, Services.filter.excludedPatterns.items.list)
+        let buttons = FlowLayoutPanel()
+        buttons.FlowDirection <- FlowDirection.RightToLeft
+        buttons.Dock <- DockStyle.Bottom
+        buttons.Height <- 40
+        buttons.Padding <- Padding(8)
+        let ok = Button()
+        ok.Text <- "OK"
+        ok.DialogResult <- DialogResult.OK
+        let cancel = Button()
+        cancel.Text <- "Cancel"
+        cancel.DialogResult <- DialogResult.Cancel
+        buttons.Controls.Add(cancel)
+        buttons.Controls.Add(ok)
+        form.AcceptButton <- null
+        form.CancelButton <- cancel
+        //docked controls are laid out last-added first: fill must be added first
+        form.Controls.Add(box)
+        form.Controls.Add(buttons)
+        form.Controls.Add(help)
+        if form.ShowDialog() = DialogResult.OK then
+            let lines =
+                box.Text.Split([|'\r'; '\n'|], StringSplitOptions.RemoveEmptyEntries)
+                |> Array.map (fun l -> l.Trim())
+                |> Array.filter (fun l -> l.Length > 0)
+            Services.filter.excludedPatterns <- Set2(List2(List.ofArray lines))
+        form.Dispose()
 
     member private this.populateNodes() =
         model.Nodes.Clear()

@@ -120,6 +120,8 @@ type Settings(isStandAlone) as this =
                         includedPaths = Set2(settingsJson.getStringArray("includedPaths").def(List2()))
                         excludedPaths = Set2(settingsJson.getStringArray("excludedPaths").def(List2()))
                         autoGroupingPaths = Set2(settingsJson.getStringArray("autoGroupingPaths").def(List2()))
+                        excludeChildProcessesPaths = Set2(settingsJson.getStringArray("excludeChildProcessesPaths").def(List2()))
+                        excludedPatterns = Set2(settingsJson.getStringArray("excludedPatterns").def(List2()))
                         licenseKey = settingsJson.getString("licenseKey").def("")
                         ticket = settingsJson.getString("ticket")
                         runAtStartup = settingsJson.getBool("runAtStartup").def(hasExistingSettings.not)
@@ -182,6 +184,8 @@ type Settings(isStandAlone) as this =
             settingsJson.setStringArray("includedPaths", settings.includedPaths.items)
             settingsJson.setStringArray("excludedPaths", settings.excludedPaths.items)
             settingsJson.setStringArray("autoGroupingPaths", settings.autoGroupingPaths.items)
+            settingsJson.setStringArray("excludeChildProcessesPaths", settings.excludeChildProcessesPaths.items)
+            settingsJson.setStringArray("excludedPatterns", settings.excludedPatterns.items)
             let appearanceObject =
                 let appearance = settings.tabAppearance
                 let obj = JObject()

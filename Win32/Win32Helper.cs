@@ -192,6 +192,36 @@ namespace Bemo
             WinUserApi.GetWindowThreadProcessId(hwnd, out pid);
             return pid;
         }
+        [StructLayout(LayoutKind.Sequential)]
+        struct PROCESS_BASIC_INFORMATION
+        {
+            public IntPtr ExitStatus;
+            public IntPtr PebBaseAddress;
+            public IntPtr AffinityMask;
+            public IntPtr BasePriority;
+            public IntPtr UniqueProcessId;
+            public IntPtr InheritedFromUniqueProcessId;
+        }
+        [DllImport("ntdll.dll")]
+        static extern int NtQueryInformationProcess(IntPtr hProcess, int processInformationClass, ref PROCESS_BASIC_INFORMATION info, int size, out int returnLength);
+        // Parent process id, or 0 when it cannot be read (access denied, process gone). The parent may already have
+        // exited and its id been reused, so callers must treat the chain as a best-effort hint and bound its length.
+        public static int GetParentProcessId(int pid)
+        {
+            IntPtr hProcess = WinBaseApi.OpenProcess(ProcessAccessRights.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (hProcess == IntPtr.Zero) return 0;
+            try
+            {
+                PROCESS_BASIC_INFORMATION info = new PROCESS_BASIC_INFORMATION();
+                int returned;
+                if (NtQueryInformationProcess(hProcess, 0, ref info, Marshal.SizeOf(info), out returned) != 0) return 0;
+                return info.InheritedFromUniqueProcessId.ToInt32();
+            }
+            finally
+            {
+                WinBaseApi.CloseHandle(hProcess);
+            }
+        }
         public static WINDOWPLACEMENT GetWindowPlacement(IntPtr hwnd)
         {
             WINDOWPLACEMENT wp = new WINDOWPLACEMENT();

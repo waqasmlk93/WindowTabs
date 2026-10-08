@@ -22,6 +22,8 @@ type SettingsRec = {
     includedPaths: Set2<string>
     excludedPaths: Set2<string>
     autoGroupingPaths : Set2<string>
+    excludeChildProcessesPaths : Set2<string>
+    excludedPatterns : Set2<string>
     version: string
     tabAppearance: TabAppearanceInfo
     runAtStartup: bool
@@ -55,6 +57,9 @@ type IFilterService =
     abstract member isTabbingEnabledForAllProcessesByDefault : bool with get, set
     abstract member setIsTabbingEnabledForProcess : string -> bool -> unit
     abstract member getIsTabbingEnabledForProcess : string -> bool
+    abstract member getExcludeChildProcesses : string -> bool
+    abstract member setExcludeChildProcesses : string -> bool -> unit
+    abstract member excludedPatterns : Set2<string> with get, set
 
 type SettingsViewType =
     | ProgramSettings
