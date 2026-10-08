@@ -368,6 +368,10 @@ type Program() as this =
 
         plugins.iter <| fun p -> p.init()
 
+        //WindowTabs.exe /settings opens the settings window straight away
+        if Environment.GetCommandLineArgs() |> Array.exists (fun arg -> arg.Equals("/settings", StringComparison.OrdinalIgnoreCase)) then
+            Services.managerView.show()
+
         Application.Run()
 
         plugins.iter <| fun p ->

@@ -28,6 +28,13 @@ type HotKeyView() =
 
     let settingsCheckbox key = checkBox(settingsProperty(key))
 
+    //a checkbox that carries its own (long) text, for options whose wording does not fit a label column
+    let textCheckbox key (text:string) =
+        let control = settingsCheckbox key :?> CheckBox
+        control.Text <- text
+        control.AutoSize <- true
+        control :> Control
+
     let dropDown (prop:IProperty<string>, items: string list) = 
         let combo = new ComboBox()
 
@@ -55,12 +62,19 @@ type HotKeyView() =
     let basicForm = 
         let fields = List2([
             ("runAtStartup", settingsCheckbox "runAtStartup")
-            ("hideInactiveTabs", settingsCheckbox "hideInactiveTabs")
             ("isTabbingEnabledForAllProcessesByDefault", checkBox(prop<IFilterService, bool>(Services.filter, "isTabbingEnabledForAllProcessesByDefault")))
-            ("autoHide", settingsCheckbox "autoHide")
             ("alignment", settingsDropDown "alignment" ["Left"; "Center"; "Right"])
         ])
         "Basics", UIHelper.form fields
+
+    //the labels here are plain text: UIHelper.form uses the text itself when the resource file has no entry
+    let groupingForm =
+        let fields = List2([
+            ("", textCheckbox "closeButtonClosesGroup" "Closing a tab with its X button closes the whole group (hold Ctrl to close just that tab)")
+            ("", textCheckbox "tabMoveRequiresShift" "Only allow tabs to be dragged while Shift is held down")
+            ("", textCheckbox "dropSameAppOnly" "Only allow windows of the same program into a group (hold Shift to override)")
+        ])
+        "Grouping", UIHelper.form fields
 
     let taskForm = 
         let fields = List2([
@@ -104,6 +118,7 @@ type HotKeyView() =
 
     let sections = List2([
         basicForm
+        groupingForm
         taskForm
         switchTabs
         ])

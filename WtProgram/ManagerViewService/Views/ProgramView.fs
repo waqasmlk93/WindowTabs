@@ -90,10 +90,10 @@ type ProgramView() as this=
         tree.RowHeight <- 24
         tree.Font <- font
         tree.BorderStyle <- BorderStyle.None
-        let addCheckBoxColumn colText propName =
+        let addCheckBoxColumn colText propName width =
             let content = resources.GetString(propName)
             let parentColumn =
-                let col = TreeColumn(content, 120)
+                let col = TreeColumn(content, width)
                 col.TextAlign <- HorizontalAlignment.Center
                 col
             tree.Columns.Add(parentColumn)
@@ -107,9 +107,9 @@ type ProgramView() as this=
                 control.EditEnabled <- true
                 control.DataPropertyName <- propName
                 control)
-        addCheckBoxColumn "Tabs" "enableTabs"
-        addCheckBoxColumn "Auto Grouping" "enableAutoGrouping"
-        addCheckBoxColumn "Sub-processes" "excludeChildProcesses"
+        addCheckBoxColumn "Tabs" "enableTabs" 90
+        addCheckBoxColumn "Auto Grouping" "enableAutoGrouping" 150
+        addCheckBoxColumn "Sub-processes" "excludeChildProcesses" 190
         tree.NodeControls.Add(
             let control = NodeControls.NodeIcon()
             control.ParentColumn <- nameColumn

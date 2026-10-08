@@ -43,7 +43,7 @@ type DesktopManagerForm() =
         form.Controls.Add(tabControl)
         form.FormBorderStyle <- FormBorderStyle.SizableToolWindow
         form.StartPosition <- FormStartPosition.CenterScreen
-        form.Size <- Size(800, 600)
+        form.Size <- Size(880, 720)
         form.Text <- title
         form.Icon <- Services.openIcon("Bemo.ico")
         form.TopMost <- true

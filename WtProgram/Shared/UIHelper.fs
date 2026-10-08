@@ -44,6 +44,51 @@ type BoolEditor() =
         member x.control = control :> Control
         member x.changed = control.CheckedChanged |> Event.map ignore
 
+//a number with its own range (IntEditor is fixed at 1..1000)
+type NumberEditor(minimum:int, maximum:int) =
+    let control = 
+        let control = NumericUpDown()
+        control.Minimum <- decimal(minimum)
+        control.Maximum <- decimal(maximum)
+        control.Margin <- Padding(0)
+        control
+    interface IPropEditor with
+        member x.value 
+            with get() = box(int(control.Value))
+            and set(newValue) = control.Value <- decimal(unbox<int>(newValue))
+        member x.control = control :> Control
+        member x.changed = control.ValueChanged |> Event.map ignore
+
+//a fixed list of choices, the value is the index of the chosen item. Values outside the list (such as the -1
+//'leave as is' of the colour presets) are ignored.
+type ChoiceEditor(items:string list) =
+    let control = 
+        let control = ComboBox()
+        control.DropDownStyle <- ComboBoxStyle.DropDownList
+        control.Items.AddRange(items |> List.toArray |> Array.map box)
+        control.Margin <- Padding(0)
+        control
+    interface IPropEditor with
+        member x.value 
+            with get() = box(max 0 control.SelectedIndex)
+            and set(newValue) =
+                let index = unbox<int>(newValue)
+                if index >= 0 && index < control.Items.Count then control.SelectedIndex <- index
+        member x.control = control :> Control
+        member x.changed = control.SelectedIndexChanged |> Event.map ignore
+
+//an on/off switch stored as 0/1, for settings kept in the integer-only tab appearance record
+type ToggleEditor() =
+    let control = CheckBox()
+    interface IPropEditor with
+        member x.value
+            with get() = box(if control.Checked then 1 else 0)
+            and set(newValue) =
+                let value = unbox<int>(newValue)
+                if value >= 0 then control.Checked <- (value = 1)
+        member x.control = control :> Control
+        member x.changed = control.CheckedChanged |> Event.map ignore
+
 type EnumEditor<'e when 'e :> Enum>() as this =
     let control = ComboBox()
     let mutable cachedValue = null
@@ -254,7 +299,7 @@ module UIHelper =
             t
 
         fields.enumerate.iter <| fun (i,(text, control:Control)) ->
-            let caption = resources.GetString text
+            let caption = match resources.GetString text with | null -> text | caption -> caption
             let label = label caption
             control.Dock <- DockStyle.Fill
             label.Margin <- Padding(0,5,0,5)
