@@ -44,6 +44,9 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     //while the top window is being dragged, resized, maximized or restored the other tabs are parked off screen and
     //only placed behind it again once it has been still for a moment; they never chase it, so they are never seen
     let isParked = ref false
+    //which tab was on top (and whether the group had the focus) when the others were parked
+    let parkedTop = ref IntPtr.Zero
+    let parkedWasForeground = ref false
     let lastMotionTick = ref 0
     let settleTicker = new System.Windows.Forms.Timer()
 
@@ -193,7 +196,19 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     member private this.parkChildren() =
         if isParked.Value.not then
             isParked := true
+            parkedTop := zorderCell.value.head
+            parkedWasForeground := this.windows.contains(this.os.foreground.hwnd)
             this.hideChildWindows()
+
+    //placing the other tabs maximizes/restores them, which raises each one above the tab that was showing:
+    //put that tab back on top, and give it the focus again if the group had it
+    member private this.restoreTopTab() =
+        if parkedTop.Value <> IntPtr.Zero && this.windows.contains(parkedTop.Value) then
+            let top = this.os.windowFromHwnd(parkedTop.Value)
+            if top.isMinimized.not then
+                top.insertAfter(WindowHandleTypes.HWND_TOP)
+                if parkedWasForeground.Value then top.setForeground(false)
+                this.saveZorder()
 
     member private this.cancelSettle() =
         settleTicker.Stop()
@@ -206,6 +221,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             if this.os.windowFromHwnd(zorderCell.value.head).isMinimized.not then
                 this.saveTopWindowPlacement()
                 this.adjustChildWindows()
+                this.restoreTopTab()
 
     //called for every size/position change of the top window that is not part of a mouse drag
     member private this.touchMotion() =
