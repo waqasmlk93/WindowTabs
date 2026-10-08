@@ -60,4 +60,5 @@ and TabAppearanceInfo = {
     tabCloseButton : int
     tabBackgroundBar : int
     tabInactiveOpacity : int
+    tabBarOpacity : int
     }

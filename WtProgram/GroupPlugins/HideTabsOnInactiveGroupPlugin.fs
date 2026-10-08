@@ -25,6 +25,12 @@ type HideTabsOnInactiveGroupPlugin() =
         let percent = if percent < 5 || percent > 100 then 38 else percent
         byte(percent * 255 / 100)
 
+    //how opaque the bar is when it is not faded: 100% unless the look says otherwise
+    member private this.activeAlpha =
+        let percent = this.group.tabAppearance.tabBarOpacity
+        let percent = if percent < 10 || percent > 100 then 100 else percent
+        byte(percent * 255 / 100)
+
     member private this.fadeTo(target:byte) =
         fadeTimer.Value.iter <| fun d -> d.Dispose()
         fadeTimer := None
@@ -46,7 +52,7 @@ type HideTabsOnInactiveGroupPlugin() =
         if this.shouldShowCompact then
             this.fadeTo(this.compactAlpha)
         else
-            this.fadeTo(byte(0xFF))
+            this.fadeTo(this.activeAlpha)
 
     interface IDragDropNotification with
         member this.dragBegin() = this.group.invokeAsync <| fun() ->

@@ -40,6 +40,7 @@ type SettingsRec = {
     alignment: string
     alwaysHideTabs: bool
     hideSingleTab: bool
+    dockTabBar: bool
     tabHideDelayMs: int
     tabShowDelayMs: int
     tabFadeMs: int

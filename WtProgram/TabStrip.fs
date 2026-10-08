@@ -58,6 +58,8 @@ type TabStrip(monitor:ITabStripMonitor) as this =
     let tabBgColor = Cell.create(Map2())
     let hwndRef = ref IntPtr.Zero
     let isShrunkCell = Cell.create(false)
+    //the bar sits in its own docked row: it is drawn on a solid background, nothing of a window shows through
+    let dockedRowCell = Cell.create(false)
     //the picture of the bar is kept: drawing it is slow, moving the window it is on is cheap
     let imageCell = Cell.create(None : Img option)
     let lastShown = ref (None : (Img * byte * bool) option)
@@ -129,10 +131,11 @@ type TabStrip(monitor:ITabStripMonitor) as this =
             onlyIcons = this.isIconOnly
             transparent = this.transparent
             appearance = 
+                let appearance = if dockedRowCell.value then { this.appearance with tabBackgroundBar = 1 } else this.appearance
                 if this.isIconOnly then
-                    { this.appearance with tabMaxWidth = 50 }
+                    { appearance with tabMaxWidth = 50 }
                 else
-                    this.appearance
+                    appearance
         }
     member private this.ts = this.tsBase this.direction
         
@@ -314,7 +317,11 @@ type TabStrip(monitor:ITabStripMonitor) as this =
         with get() = iconOnlyCell.value
         and set(value) = iconOnlyCell.set(value)
 
-    member this.isShrunk    
+    member this.dockedRow
+        with get() = dockedRowCell.value
+        and set(value) = dockedRowCell.set(value)
+
+    member this.isShrunk        
         with get() = isShrunkCell.value
         and set(newValue) = isShrunkCell.set(newValue)
 

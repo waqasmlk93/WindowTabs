@@ -63,6 +63,8 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     let settleTicker = new System.Windows.Forms.Timer()
     //follow-up checks of the tab bar's place in the z-order after tabs were placed (the apps do it a little later)
     let stripChecks : IDisposable list ref = ref []
+    //true while some window of the group has been made smaller to leave the docked bar its row
+    let dockActive = ref false
 
     let isMaximizedExport = Cell.export <| fun() ->
         zorderCell.value.tryHead.exists(fun hwnd -> this.os.windowFromHwnd(hwnd).isMaximized)
@@ -267,6 +269,95 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                     else
                         strip.insertAfter(prev)
 
+    //----------------------------------------------------------- docked bar (Groupy style)
+
+    member this.tabCount = this.windows.count
+
+    //the bar has its own row above the windows when the option is on and there is more than one tab
+    member this.dockWanted =
+        Services.settings.getValue("dockTabBar").cast<bool>() && this.windows.count >= 2
+
+    //the row at the top of the work area that a maximized top window leaves to the bar
+    member this.dockRow : Rect option =
+        if this.dockWanted && this.isEmpty.not then
+            let top = this.os.windowFromHwnd(zorderCell.value.head)
+            if top.isMinimized.not && top.isMaximized then
+                Mon.fromHwnd(top.hwnd).map(fun mon ->
+                    Rect(Pt(mon.workRect.left, mon.workRect.top), Sz(mon.workRect.width, this.tabAppearance.tabHeight)))
+            else None
+        else None
+
+    //where the visible part of a maximized window goes: the work area, less the bar's row when it is docked
+    member private this.dockTarget(hwnd:IntPtr) : Rect option =
+        Mon.fromHwnd(hwnd).map <| fun mon ->
+            let work = mon.workRect
+            if this.dockWanted then
+                let h = this.tabAppearance.tabHeight
+                Rect(Pt(work.left, work.top + h), Sz(work.width, work.height - h))
+            else work
+
+    member private this.dockClose(a:Rect, b:Rect) =
+        abs(a.left - b.left) <= 2 && abs(a.top - b.top) <= 2 && abs(a.width - b.width) <= 2 && abs(a.height - b.height) <= 2
+
+    //a maximized window that is already where the docked layout wants it (that is our own doing, not the user's)
+    member private this.isDocked(hwnd:IntPtr) : bool =
+        if this.dockWanted || dockActive.Value then
+            let window = this.os.windowFromHwnd(hwnd)
+            if window.isMinimized.not && window.isMaximized then
+                match this.dockTarget(hwnd) with
+                | Some(target) -> this.dockClose(window.visibleBounds, target)
+                | None -> false
+            else false
+        else false
+
+    //make a maximized window leave the bar its row (or take the whole work area back)
+    member private this.dockWindow(hwnd:IntPtr) =
+        if this.dockWanted || dockActive.Value then
+            let window = this.os.windowFromHwnd(hwnd)
+            if window.isMinimized.not && window.isMaximized then
+                match this.dockTarget(hwnd) with
+                | Some(target) when this.dockClose(window.visibleBounds, target).not ->
+                    window.moveVisible(target)
+                    dockActive := this.dockWanted
+                | _ -> ()
+
+    //the same for the tabs behind the top one, which are placed (maximized) by their own apps a moment later
+    member private this.dockLayout() =
+        if (this.dockWanted || dockActive.Value) && this.isEmpty.not then
+            let top = this.os.windowFromHwnd(zorderCell.value.head)
+            if top.isMinimized.not && top.isMaximized then
+                this.dockWindow(top.hwnd)
+                match this.dockTarget(top.hwnd) with
+                | Some(target) when isParked.Value.not ->
+                    let w = top.bounds
+                    let v = top.visibleBounds
+                    let l, t, r, b = v.left - w.left, v.top - w.top, w.right - v.right, w.bottom - v.bottom
+                    let rect = Rect(Pt(target.left - l, target.top - t), Sz(target.width + l + r, target.height + t + b))
+                    zorderCell.value.tail.where(fun hwnd -> this.os.windowFromHwnd(hwnd).isMinimized.not).iter <| fun hwnd ->
+                        this.os.windowFromHwnd(hwnd).moveAsync(rect)
+                | _ -> ()
+                if this.dockWanted.not then dockActive := false
+
+    //a restored window leaves the bar room above it, if there is none the window is moved down
+    member private this.ensureDockRoom() =
+        if this.dockWanted && this.isEmpty.not && splitRef.Value.IsNone then
+            let top = this.os.windowFromHwnd(zorderCell.value.head)
+            if top.isMinimized.not && top.isMaximized.not then
+                match Mon.fromHwnd(top.hwnd) with
+                | Some(mon) ->
+                    let b = top.bounds
+                    let work = mon.workRect
+                    let needTop = work.top + this.tabAppearance.tabHeight - this.tabAppearance.tabHeightOffset
+                    if b.top < needTop && b.top >= work.top - 200 then
+                        let height = max 150 (min b.height (work.bottom - needTop))
+                        top.move(Rect(Pt(b.left, needTop), Sz(b.width, height)))
+                | None -> ()
+
+    member this.refreshDock() = this.invokeAsync <| fun() ->
+        this.dockLayout()
+        this.ensureDockRoom()
+        isMaximizedExport.update()
+
     //put the other tabs back behind the top window now, if they are parked
     member private this.settleNow() =
         this.cancelSettle()
@@ -278,7 +369,9 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                 this.saveTopWindowPlacement()
                 this.adjustChildWindows()
                 this.restoreTopTab()
+                this.ensureDockRoom()
             this.raiseStripSoon()
+            this.dockLayout()
 
     //called for every size/position change of the top window that is not part of a mouse drag
     member private this.touchMotion() =
@@ -494,7 +587,9 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             this.adjustChildWindows()
             this.makeTopWindowForeground()
         isMaximizedExport.update()
+        this.ensureDockRoom()
         this.raiseStripSoon()
+        this.dockLayout()
         this.updateIsVisible()
 
     //-------------------------------------------------------------- split view
@@ -698,8 +793,13 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         //event when they loose focus, we don't want to automatically give them focus in this case
         //so make sure that the window HAD focus before reapplying it
         | WinEvent.EVENT_OBJECT_LOCATIONCHANGE ->
-            if this.isDriver(hwnd) && inMoveSize.value.not && this.ignoreLocationChange(hwnd).not then
+            if this.isDriver(hwnd) && inMoveSize.value.not && this.isDocked(hwnd) then
+                //the window is where the docked layout put it: nothing to do
+                isMaximizedExport.update()
+            elif this.isDriver(hwnd) && inMoveSize.value.not && this.ignoreLocationChange(hwnd).not then
                 driverRef := hwnd
+                //a window that was just maximized gives the bar its row at once, not after the tabs have settled
+                this.dockWindow(hwnd)
                 //hide the other tabs before doing anything slower, every millisecond they stay visible is seen
                 this.parkChildren()
                 //you can miss EVENT_SYSTEM_MOVESIZESTART events

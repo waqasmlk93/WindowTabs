@@ -51,6 +51,11 @@ Changes on top of upstream, all in the Settings window (right-click the tray ico
   the two share changes the split, minimizing hides both, and a group dragged to a monitor with different scaling keeps
   its proportions. Clicking a tab that is not on show puts it in place of the side that has the focus; the right-click
   menu also has *Swap the two sides* and *Close split view*. Closing one of the two windows ends the split.
+- **Docked tab bar (Groupy style).** Appearance > *Docked bar*: with two or more tabs the bar has its own row above the
+  windows. A maximized group is made smaller to leave that row, so the bar never covers a title bar (a restored window that has
+  no room above it is moved down). A window with no other tabs keeps only a thin bar along its top edge that opens when the mouse
+  is over it. The bar's height (*Height*), look (*Style*: rounded tabs, *Bar behind the tabs*) and *Bar opacity* are set on the
+  same page, per program if you like.
 - **New tab to the right.** Right-click a tab and choose *New tab to the right*: another window of the same program is
   started and joins the group as the tab right of the one you clicked (in a split group it takes the place of the side
   that has the focus). The new window is recognised by program, so it also works for programs that reuse one process.

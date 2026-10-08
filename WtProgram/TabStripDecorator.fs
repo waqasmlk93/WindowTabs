@@ -60,6 +60,14 @@ type TabStripDecorator(group:WindowGroup) as this =
         group.removed.Add <| fun _ -> this.updateTsPlacement()
         Services.settings.notifyValue "hideSingleTab" <| fun _ ->
             this.invokeAsync <| fun() -> this.updateTsPlacement()
+        //the docked bar: the windows and the bar are laid out again when it is switched on or off, or when tabs come and go
+        Services.settings.notifyValue "dockTabBar" <| fun _ ->
+            group.refreshDock()
+            this.invokeAsync <| fun() -> this.updateTsPlacement()
+        group.added.Add <| fun _ -> group.refreshDock()
+        group.removed.Add <| fun _ -> group.refreshDock()
+        group.appearanceChanged.Add <| fun() -> group.refreshDock()
+        group.isMaximized.changed.Add <| fun() -> this.updateTsPlacement()
 
         group.exited.Add <| fun() ->
             Services.dragDrop.unregisterTarget(this.ts.hwnd)
@@ -73,11 +81,23 @@ type TabStripDecorator(group:WindowGroup) as this =
         this.ts.slide <- this.tabSlide
 
     member private this.updateTsPlacement() = 
-        let hideSingle = Services.settings.getValue("hideSingleTab").cast<bool>() && this.ts.tabs.count <= 1
+        let dock = Services.settings.getValue("dockTabBar").cast<bool>()
+        //with the docked bar a window without other tabs keeps a thin bar that opens when the mouse is over it
+        let hideSingle = dock.not && Services.settings.getValue("hideSingleTab").cast<bool>() && this.ts.tabs.count <= 1
         if group.bounds.value.IsNone || hideSingle then
             this.ts.visible <- false
         else
-            this.ts.setPlacement(this.placement)
+            this.ts.dockedRow <- group.dockRow.IsSome
+            match group.dockRow with
+            | Some(row) ->
+                //a maximized window has been made smaller to leave this row: the bar is full width and has its own place
+                let indent = group.tabAppearance.tabIndentNormal
+                this.ts.setPlacement({
+                    showInside = false
+                    bounds = Rect(Pt(row.x + indent, row.y), Sz(row.width - 2 * indent, row.height))
+                })
+            | None ->
+                this.ts.setPlacement(this.placement)
             this.ts.visible <- true
 
     member private this.invokeAsync f = group.invokeAsync f
@@ -352,6 +372,9 @@ type TabStripDecorator(group:WindowGroup) as this =
         let settingsVersionCell = Cell.create(0)
         let bump(_) = this.invokeAsync <| fun() -> settingsVersionCell.value <- settingsVersionCell.value + 1
         Services.settings.notifyValue "alwaysHideTabs" bump
+        Services.settings.notifyValue "dockTabBar" bump
+        group.added.Add <| fun _ -> bump(null)
+        group.removed.Add <| fun _ -> bump(null)
         Services.settings.notifyValue "tabHideDelayMs" bump
         Services.settings.notifyValue "tabShowDelayMs" bump
         let isRecentlyChangedZorderCell =
@@ -370,8 +393,12 @@ type TabStripDecorator(group:WindowGroup) as this =
             let hideDelay = max 1 (Services.settings.getValue("tabHideDelayMs").cast<int>())
             let showDelay = max 0 (Services.settings.getValue("tabShowDelayMs").cast<int>())
             //collapse a maximized window's bar (when auto hide is on), or every bar when 'always hide' is on
+            //(docked bar: a window with no other tab keeps a thin bar that opens on hover; with several tabs the bar
+            //is always shown in its own row and does not collapse when maximized)
+            let dock = Services.settings.getValue("dockTabBar").cast<bool>()
+            let lonely = dock && group.tabCount <= 1
             let shrink = 
-                (alwaysHide || (isMaximized.value && autoHideCell.value)) && 
+                (alwaysHide || lonely || (dock.not && isMaximized.value && autoHideCell.value)) &&  
                 isMouseOver.value.not && 
                 isDraggingCell.value.not &&
                 contextMenuVisibleCell.value.not &&

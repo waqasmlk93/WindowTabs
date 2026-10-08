@@ -77,6 +77,7 @@ type Settings(isStandAlone) as this =
             tabCloseButton = 0
             tabBackgroundBar = 0
             tabInactiveOpacity = 38
+            tabBarOpacity = 100
         }
  
     member this.darkModeTabAppearance =
@@ -98,6 +99,7 @@ type Settings(isStandAlone) as this =
             tabCloseButton = -1
             tabBackgroundBar = -1
             tabInactiveOpacity = -1
+            tabBarOpacity = -1
         }
 
     member this.darkModeBlueTabAppearance =
@@ -119,6 +121,7 @@ type Settings(isStandAlone) as this =
             tabCloseButton = -1
             tabBackgroundBar = -1
             tabInactiveOpacity = -1
+            tabBarOpacity = -1
         }
 
     //reads the saved fields of one tab appearance on top of a base appearance; fields not saved keep the base value
@@ -185,6 +188,7 @@ type Settings(isStandAlone) as this =
                         alignment = settingsJson.getString("alignment").def("Center")
                         alwaysHideTabs = settingsJson.getBool("alwaysHideTabs").def(false)
                         hideSingleTab = settingsJson.getBool("hideSingleTab").def(false)
+                        dockTabBar = settingsJson.getBool("dockTabBar").def(false)
                         tabHideDelayMs = settingsJson.getInt32("tabHideDelayMs").def(100)
                         tabShowDelayMs = settingsJson.getInt32("tabShowDelayMs").def(0)
                         tabFadeMs = settingsJson.getInt32("tabFadeMs").def(0)
@@ -225,6 +229,7 @@ type Settings(isStandAlone) as this =
             settingsJson.setBool("enableShiftScroll", settings.enableShiftScroll)
             settingsJson.setBool("alwaysHideTabs", settings.alwaysHideTabs)
             settingsJson.setBool("hideSingleTab", settings.hideSingleTab)
+            settingsJson.setBool("dockTabBar", settings.dockTabBar)
             settingsJson.setInt64("tabHideDelayMs", int64(settings.tabHideDelayMs))
             settingsJson.setInt64("tabShowDelayMs", int64(settings.tabShowDelayMs))
             settingsJson.setInt64("tabFadeMs", int64(settings.tabFadeMs))

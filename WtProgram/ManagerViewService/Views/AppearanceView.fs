@@ -103,6 +103,9 @@ type AppearanceView() as this =
         colorConfig "tabActiveBgColor" "Background Active"
         colorConfig "tabFlashBgColor" "Background Flash"
         colorConfig "tabBorderColor" "Border"
+        heading "Docked bar (like Groupy)"
+        settingToggle "dockTabBar" "Give the bar its own row above the windows; a window with no other tabs shows it on hover"
+        numberConfig "tabBarOpacity" "Bar opacity (%)" 10 100
         heading "When the tab bar is visible"
         settingToggle "hideInactiveTabs" "Fade the tab bar of windows that are not active"
         numberConfig "tabInactiveOpacity" "Faded bar opacity (%)" 5 100
