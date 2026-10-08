@@ -269,10 +269,11 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                 if window.placement.showCmd = ShowWindowCommands.SW_SHOWMINIMIZED then
                     window.setPlacement({wp with showCmd = ShowWindowCommands.SW_SHOWMINIMIZED})
                 else
-                    if window.placement.showCmd = ShowWindowCommands.SW_SHOWMAXIMIZED &&
-                        wp.showCmd = ShowWindowCommands.SW_SHOWMAXIMIZED then
+                    if wp.showCmd = ShowWindowCommands.SW_SHOWMAXIMIZED then
                         //maximized windows won't move from one monitor to another by setting placement alone,
-                        //need to first move to the new bounds, then set placement
+                        //need to first move to the new bounds, then set placement. This also covers a tab that
+                        //was parked off screen un-maximized while the group was dragged: it has to land on the
+                        //target monitor first, otherwise it maximizes on the monitor it was parked on
                         window.move(bounds)
                     window.setPlacement(wp)   
                      

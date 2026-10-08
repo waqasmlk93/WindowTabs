@@ -501,25 +501,24 @@ and
         WinUserApi.TrackMouseEvent(ref tme) |> ignore
 
     member this.hideOffScreen (size:Sz option) =
-        let corners = Mon.all.map <| fun monitor -> monitor.workRect.BR.sub(monitor.workRect.location)
-        let corner = corners.fold (Pt()) <| fun maxCorner corner ->
-            if maxCorner.x < corner.x then maxCorner else corner
-
-        let corner = corners.fold corner <| fun maxCorner corner ->
-            if  maxCorner.x = corner.x && 
-                maxCorner.y < corner.y then
-                maxCorner
-            else
-                corner
+        //park the window with its top-left on the bottom-right corner of the right-most (then lowest) monitor,
+        //so it is on no screen but the window is still "on" a monitor, in absolute virtual-screen coordinates
+        let corner =
+            Mon.all.map(fun monitor -> monitor.workRect.BR).fold (Pt(Int32.MinValue, Int32.MinValue)) <| fun best br ->
+                if br.x > best.x || (br.x = best.x && br.y > best.y) then br else best
         let corner = Pt(corner.x-1, corner.y-1)
+        //SetWindowPlacement ignores the new rcNormalPosition when the same call also un-maximizes the window,
+        //which left maximized tabs sitting visibly at their old spot while the group was dragged: restore first
+        if this.isMaximized then this.showWindow(ShowWindowCommands.SW_SHOWNOACTIVATE)
+        let placement = this.placement
         this.setPlacement({
-            this.placement with
+            placement with
                 showCmd = ShowWindowCommands.SW_SHOWNOACTIVATE
                 rcNormalPosition = Rect(
                     corner,
-                    if size.IsSome then size.Value else this.placement.rcNormalPosition.size
+                    if size.IsSome then size.Value else placement.rcNormalPosition.size
                 )
-        }) 
+        })
 
     override this.Equals(yobj) =
         match yobj with
