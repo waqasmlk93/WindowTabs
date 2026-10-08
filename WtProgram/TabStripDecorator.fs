@@ -84,6 +84,24 @@ type TabStripDecorator(group:WindowGroup) as this =
     member private this.updateTsSlide() =
         this.ts.slide <- this.tabSlide
 
+    //where the bar goes: (inside the window?, its rectangle, is it the docked row of a maximized group?)
+    member private this.barPlacement() : bool * Rect * bool =
+        let dock = Services.settings.getValue("dockTabBar").cast<bool>()
+        match group.dockRow with
+        | Some(row) ->
+            //a maximized window has been made smaller to leave this row: the bar is full width and has its own place
+            (false, row, true)
+        | None ->
+            let normal = this.placement
+            if dock && normal.showInside.not && group.topWindow <> IntPtr.Zero then
+                //docked bar above a restored window: exactly as wide as the part of the window you can see (the
+                //window's own rectangle also covers the invisible resize borders) and ending where it begins
+                let v = os.windowFromHwnd(group.topWindow).visibleBounds
+                let h = group.tabAppearance.tabHeight
+                (false, Rect(Pt(v.left, v.top - h), Sz(v.width, h)), false)
+            else
+                (normal.showInside, normal.bounds, false)
+
     member private this.updateTsPlacement() =
       try
         let dock = Services.settings.getValue("dockTabBar").cast<bool>()
@@ -97,28 +115,26 @@ type TabStripDecorator(group:WindowGroup) as this =
             this.ts.visible <- false
         else
             this.ts.dockedRow <- group.dockRow.IsSome
-            match group.dockRow with
-            | Some(row) ->
-                //a maximized window has been made smaller to leave this row: the bar is full width and has its own place
-                this.ts.setPlacement({
-                    showInside = false
-                    bounds = row
-                })
-            | None ->
-                let normal = this.placement
-                if dock && normal.showInside.not && group.topWindow <> IntPtr.Zero then
-                    //docked bar above a restored window: exactly as wide as the part of the window you can see (the
-                    //window's own rectangle also covers the invisible resize borders) and ending where it begins
-                    let v = os.windowFromHwnd(group.topWindow).visibleBounds
-                    let h = group.tabAppearance.tabHeight
-                    this.ts.setPlacement({ normal with bounds = Rect(Pt(v.left, v.top - h), Sz(v.width, h)) })
-                else
-                    this.ts.setPlacement(normal)
+            let (inside, bounds, _) = this.barPlacement()
+            this.ts.setPlacement({ showInside = inside; bounds = bounds })
             this.ts.visible <- true
       with ex -> ExceptionLog.write "updateTsPlacement" ex
 
-    //watches the mouse: over the top edge of a window that has no other tab the bar opens (a timer, because there is no
-    //window there to receive the mouse, so nothing sits over the title bar and blocks clicks)
+    //Where the mouse has to be for the bar of a window with no other tab to open (and to stay open):
+    // - over a restored window: the band where the bar goes (just above the window) and the top 14 px of the window,
+    // - over a maximized window (or one with no room above it): the very top row of the screen, which is easy to hit
+    //   because the screen edge stops the mouse; once the bar is open, the whole bar.
+    member private this.hoverZone(bar:Rect, inside:bool, isOpen:bool) : Rect option =
+        if group.topWindow = IntPtr.Zero then None
+        else
+            let v = os.windowFromHwnd(group.topWindow).visibleBounds
+            if inside then
+                Some(Rect(Pt(v.left, v.top), Sz(v.width, (if isOpen then bar.height + 6 else 2))))
+            else
+                Some(Rect(Pt(v.left, bar.y), Sz(v.width, bar.height + 14)))
+
+    //watches the mouse (a timer, because there is no window there to receive the mouse, so nothing sits over the
+    //title bar of the program and blocks clicks while the bar is closed)
     member private this.initEdgeHover() =
         let pending = ref false
         //a plain background timer (it does not depend on which thread this was built on); the group's state is only
@@ -133,21 +149,16 @@ type TabStripDecorator(group:WindowGroup) as this =
                 let inZone =
                     if dock && group.tabCount <= 1 && group.bounds.value.IsSome then
                         let p = Control.MousePosition
-                        let bar = this.placement
-                        let r = bar.bounds
-                        //an open bar over the window: its first few pixels; a bar above the window: the few pixels just above it
-                        let zone =
-                            if bar.showInside then
-                                //a maximized window's frame starts above the screen: the strip to watch is the screen's top edge
-                                Rect(Pt(r.x, max r.y (Screen.FromPoint(p).Bounds.Top)), Sz(r.width, 3))
-                            else Rect(Pt(r.x, r.y + r.height - 7), Sz(r.width, 7))
-                        p.X >= zone.x && p.X < zone.x + zone.width && p.Y >= zone.y && p.Y < zone.y + zone.height
+                        let (inside, bar, _) = this.barPlacement()
+                        match this.hoverZone(bar, inside, edgeHoverCell.value) with
+                        | Some(z) -> p.X >= z.x && p.X < z.x + z.width && p.Y >= z.y && p.Y < z.y + z.height
+                        | None -> false
                     else false
                 if inZone <> edgeHoverCell.value then
                     edgeHoverCell.value <- inZone
                     this.updateTsPlacement()
               with _ -> ()
-        let timer = new System.Threading.Timer(System.Threading.TimerCallback(onTick), null, 200, 70)
+        let timer = new System.Threading.Timer(System.Threading.TimerCallback(onTick), null, 200, 50)
         group.exited.Add <| fun() -> timer.Dispose()
 
     member private this.invokeAsync f = group.invokeAsync f
