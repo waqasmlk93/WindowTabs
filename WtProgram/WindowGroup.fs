@@ -240,6 +240,22 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     member private this.cancelSettle() =
         settleTicker.Stop()
 
+    //The tab bar is a window owned by the top tab and has to sit directly above it. Maximizing, restoring, dragging and
+    //raising tabs can leave it under the top window, which hides it completely (maximized) or cuts it in half behind
+    //whatever window is above (restored). Put it back right above the top tab.
+    member private this.raiseStrip() =
+        if this.isEmpty.not then
+            let top = this.os.windowFromHwnd(zorderCell.value.head)
+            if top.isMinimized.not then
+                let strip = this.os.windowFromHwnd(this.ts.hwnd)
+                let prev = top.prevZorder
+                if prev.hwnd <> strip.hwnd then
+                    //if the window above the top tab is topmost, going after it would make the bar topmost too
+                    if prev.hwnd <> IntPtr.Zero && prev.isTopMost && top.isTopMost.not then
+                        strip.insertAfter(WindowHandleTypes.HWND_NOTOPMOST)
+                    else
+                        strip.insertAfter(prev)
+
     //put the other tabs back behind the top window now, if they are parked
     member private this.settleNow() =
         this.cancelSettle()
@@ -251,6 +267,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                 this.saveTopWindowPlacement()
                 this.adjustChildWindows()
                 this.restoreTopTab()
+            this.raiseStrip()
 
     //called for every size/position change of the top window that is not part of a mouse drag
     member private this.touchMotion() =
@@ -463,6 +480,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             this.saveTopWindowPlacement()
             this.adjustChildWindows()
             this.makeTopWindowForeground()
+        this.raiseStrip()
         this.updateIsVisible()
 
     //-------------------------------------------------------------- split view
@@ -686,9 +704,11 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                         this.focusDriverOrTop(hwnd)
                     this.foreground <- this.os.foreground.hwnd
                     isMaximizedExport.update()
+                    this.raiseStrip()
         | WinEvent.EVENT_SYSTEM_FOREGROUND ->
             this.foreground <- hwnd
             this.saveZorder()
+            this.raiseStrip()
         | _ -> ()
       
     member this.addWindow(hwnd, withDelay) = this.withUpdate <| fun() ->

@@ -185,6 +185,8 @@ type TabStripDecorator(group:WindowGroup) as this =
                 image = None
                 click = fun() ->
                     group.bb.write("autoHide", isEnabled.not)
+                    //also the saved setting, otherwise the choice is gone the next time WindowTabs starts
+                    Services.settings.setValue("autoHide", box(isEnabled.not))
             })
 
         let newWindowItem =
