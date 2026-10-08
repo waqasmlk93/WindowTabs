@@ -57,6 +57,10 @@ type TabStrip(monitor:ITabStripMonitor) as this =
     let tabBgColor = Cell.create(Map2())
     let hwndRef = ref IntPtr.Zero
     let isShrunkCell = Cell.create(false)
+    //the picture of the bar is kept: drawing it is slow, moving the window it is on is cheap
+    let imageCell = Cell.create(None : Img option)
+    let lastShown = ref (None : (Img * byte * bool) option)
+    let lastGcTick = ref 0
 
     let isMouseOverExport = Cell.export <| fun() ->
         hoverCell.value.IsSome
@@ -77,8 +81,12 @@ type TabStrip(monitor:ITabStripMonitor) as this =
         
         isMouseOverExport.init()
 
+        //redraw only when something that changes how the bar looks changes (this listener does not read the
+        //location, alpha or collapsed state), and only move the window when just its position changed
         Cell.listen <| fun() ->
-            this.update()
+            if this.visible then imageCell.set(Some(this.renderFull))
+        Cell.listen <| fun() ->
+            this.updateWindow()
 
     member private this.inAltSwitch = isInAltTabCell.value
 
@@ -168,7 +176,7 @@ type TabStrip(monitor:ITabStripMonitor) as this =
             this.setPt(None)
             capturedCell.set(None)
             hoverCell.set(None)
-        this.update()
+        this.updateWindow()
 
     member private this.wndProc(msg:Win32Message) =
         let mousePt() = msg.lParam.location
@@ -211,25 +219,37 @@ type TabStrip(monitor:ITabStripMonitor) as this =
     member private this.contentOffset = this.appearance.tabHeightOffset
     member private this.location = locationCell.value 
     
-    member private this.update() = 
-        if this.visible then 
-            let img = this.render
-            //a collapsed bar above its window must stay glued to the window edge, not to the top of the full-height bar
-            let location =
-                if this.isShrunk && this.direction = TabDirection.TabUp then this.location.add(Pt(0, max 0 (this.size.height - img.height)))
-                else this.location
-            this.window.update(img, location, this.alpha)
-            GC.Collect()
-        else this.window.hide()
-    
-    member private this.render : Img = 
+    member private this.updateWindow() =
+        if this.visible then
+            match imageCell.value with
+            | None -> ()
+            | Some(full) ->
+                let shrunk = this.isShrunk
+                let shownHeight = if shrunk then min 7 full.height else full.height
+                //a collapsed bar above its window must stay glued to the window edge, not to the top of the full-height bar
+                let location =
+                    if shrunk && this.direction = TabDirection.TabUp then this.location.add(Pt(0, max 0 (this.size.height - shownHeight)))
+                    else this.location
+                match lastShown.Value with
+                | Some(img, alpha, wasShrunk) when obj.ReferenceEquals(img, full) && alpha = this.alpha && wasShrunk = shrunk ->
+                    //the picture is the one already on screen, only the position changed
+                    this.window.updateLocation(location)
+                | _ ->
+                    let img = if shrunk then full.clip(Rect(Pt(0, full.height - 7), Sz(full.width, 7))) else full
+                    this.window.update(img, location, this.alpha)
+                    lastShown := Some(full, this.alpha, shrunk)
+                    //bitmaps are disposed now, the collection is only a safety net
+                    if Environment.TickCount - lastGcTick.Value > 5000 then
+                        lastGcTick := Environment.TickCount
+                        GC.Collect()
+        else
+            lastShown := None
+            this.window.hide()
+
+    member private this.renderFull : Img =
         try
-            let img = this.ts.render
-            if this.isShrunk then
-                img.clip(Rect(Pt(0, img.height - 7), Sz(img.width, 7)))
-            else
-                img
-        with ex -> 
+            this.ts.render
+        with ex ->
             Img(Sz(1,1))
 
     

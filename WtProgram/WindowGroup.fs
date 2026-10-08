@@ -41,6 +41,11 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     let isDraggingExport = Cell.export <| fun() -> isDraggingCell.value
     let zorderExport = Cell.export <| fun() -> zorderCell.value
     let isVisibleCell = Cell.create(false)
+    //while the top window is being dragged, resized, maximized or restored the other tabs are parked off screen and
+    //only placed behind it again once it has been still for a moment; they never chase it, so they are never seen
+    let isParked = ref false
+    let lastMotionTick = ref 0
+    let settleTicker = new System.Windows.Forms.Timer()
 
     let isMaximizedExport = Cell.export <| fun() ->
         zorderCell.value.tryHead.exists(fun hwnd -> this.os.windowFromHwnd(hwnd).isMaximized)
@@ -56,6 +61,13 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
 
     member this.init(ts:TabStrip) =
         _ts := Some(ts)
+
+        //one timer that is started by motion and checks how long the top window has been still
+        settleTicker.Interval <- 40
+        settleTicker.Tick.Add <| fun _ ->
+            if Environment.TickCount - lastMotionTick.Value >= 120 then
+                settleTicker.Stop()
+                this.invokeAsync <| fun() -> this.settleNow()
 
         winEventHandler.set(Some(
             _os.setSingleWinEvent WinEvent.EVENT_SYSTEM_FOREGROUND <| fun(hwnd) -> 
@@ -177,6 +189,29 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             let window = this.os.windowFromHwnd(top)
             window.setForeground(false)
         | None -> ()
+
+    member private this.parkChildren() =
+        if isParked.Value.not then
+            isParked := true
+            this.hideChildWindows()
+
+    member private this.cancelSettle() =
+        settleTicker.Stop()
+
+    //put the other tabs back behind the top window now, if they are parked
+    member private this.settleNow() =
+        this.cancelSettle()
+        if isParked.Value && inMoveSize.value.not then
+            isParked := false
+            if this.os.windowFromHwnd(zorderCell.value.head).isMinimized.not then
+                this.saveTopWindowPlacement()
+                this.adjustChildWindows()
+
+    //called for every size/position change of the top window that is not part of a mouse drag
+    member private this.touchMotion() =
+        this.parkChildren()
+        lastMotionTick := Environment.TickCount
+        if settleTicker.Enabled.not then settleTicker.Start()
 
     member private this.hideChildWindows() =
         zorderCell.value.tail.where(isMinimized >> not).iter(fun window -> this.os.windowFromHwnd(window).hideOffScreen(None))
@@ -329,17 +364,30 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
 
     member this.onEnterMoveSize() =
         inMoveSize.set(true)
-        this.hideChildWindows()
+        this.cancelSettle()
+        this.parkChildren()
         this.updateIsVisible()
 
     member this.onExitMoveSize() =
         inMoveSize.set(false)
+        this.cancelSettle()
+        isParked := false
         this.saveTopWindowPlacement()
         this.adjustChildWindows()
         this.makeTopWindowForeground()
         this.updateIsVisible()
 
-    member this.main(hwnd, evt) = this.invokeAsync <| fun() -> this.withUpdate <| fun() ->
+    member this.main(hwnd, evt) = this.invokeAsync <| fun() -> this.mainBody(hwnd, evt)
+
+    //size/position events can arrive faster than they can be handled; queue at most one and let it read the current state
+    member this.mainCoalesced(hwnd, evt, pending:bool ref) =
+        if pending.Value.not then
+            pending := true
+            this.invokeAsync <| fun() ->
+                pending := false
+                this.mainBody(hwnd, evt)
+
+    member private this.mainBody(hwnd, evt) = this.withUpdate <| fun() ->
         match evt with
         | WinEvent.EVENT_SYSTEM_MINIMIZESTART -> 
             if this.windows.contains(hwnd) then
@@ -383,6 +431,8 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         //so make sure that the window HAD focus before reapplying it
         | WinEvent.EVENT_OBJECT_LOCATIONCHANGE ->
             if this.isTop(hwnd) && inMoveSize.value.not then
+                //hide the other tabs before doing anything slower, every millisecond they stay visible is seen
+                this.parkChildren()
                 //you can miss EVENT_SYSTEM_MOVESIZESTART events
                 //when a window is created and is immediatly in move size, we subscribe
                 //to the event too late (Chrome tab dragging is prime example)
@@ -394,7 +444,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                 else
                     let isForeground = this.os.foreground.hwnd = hwnd
                     this.saveTopWindowPlacement()
-                    this.adjustChildWindows()
+                    this.touchMotion()
                     if isForeground then
                         this.makeTopWindowForeground()
                     this.foreground <- this.os.foreground.hwnd
@@ -414,8 +464,11 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             if prevTop.value.IsNone then
                 prevTop.set(Some(hwnd))
                 this.saveTopWindowPlacement()
-            let registerEvent evt = 
-                let handler = fun() -> this.main(hwnd, evt)
+            let registerEvent evt =
+                let pending = ref false
+                let handler =
+                    if evt = WinEvent.EVENT_OBJECT_LOCATIONCHANGE then fun() -> this.mainCoalesced(hwnd, evt, pending)
+                    else fun() -> this.main(hwnd, evt)
                 let handler =
                     if conflateEvents.contains(evt) then Helper.conflate (TimeSpan(0,0,1)) handler
                     else handler
@@ -477,6 +530,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     member this.destroy() =
         if isDestroyed.value.not then
             isDestroyed.set(true)
+            settleTicker.Dispose()
             this.ts.destroy()
             shellHookWindow.value.iter <| fun d -> d.Dispose()
             winEventHandler.value.iter <| fun d -> d.Dispose()
@@ -505,7 +559,9 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             if window.isMinimized then
                 window.showWindow(ShowWindowCommands.SW_SHOWNOACTIVATE)
         
-    member this.tabActivate(Tab(hwnd), force) = 
+    member this.tabActivate(Tab(hwnd), force) =
+        //activating a tab while the others are still parked would show it where it was parked
+        this.settleNow()
         let window = this.os.windowFromHwnd(hwnd)
         window.setForegroundOrRestore(force)
         window.bringToTop()

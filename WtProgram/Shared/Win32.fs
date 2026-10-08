@@ -425,6 +425,7 @@ and
             gfx.Dispose()
             imageWithBg
         Win32Helper.UpdateLayeredWindow(hwnd, location.Point, image, alpha)
+        image.Dispose()
         this.showNoActivate()
     
     member this.updateLocation(location:Pt) =       
