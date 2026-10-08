@@ -61,6 +61,8 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     let parkedWasForeground = ref false
     let lastMotionTick = ref 0
     let settleTicker = new System.Windows.Forms.Timer()
+    //follow-up checks of the tab bar's place in the z-order after tabs were placed (the apps do it a little later)
+    let stripChecks : IDisposable list ref = ref []
 
     let isMaximizedExport = Cell.export <| fun() ->
         zorderCell.value.tryHead.exists(fun hwnd -> this.os.windowFromHwnd(hwnd).isMaximized)
@@ -240,6 +242,14 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
     member private this.cancelSettle() =
         settleTicker.Stop()
 
+    //The apps carry out the requests for their windows (maximize, move, z-order) a little after we made them and each
+    //one can push the other tabs between the top tab and its bar, so check again while they finish
+    member private this.raiseStripSoon() =
+        this.raiseStrip()
+        stripChecks.Value |> List.iter (fun d -> d.Dispose())
+        stripChecks := [60; 180; 400; 800; 1500; 2500] |> List.map (fun ms ->
+            ThreadHelper.cancelablePostBack ms (fun() -> this.invokeAsync <| fun() -> this.raiseStrip()))
+
     //The tab bar is a window owned by the top tab and has to sit directly above it. Maximizing, restoring, dragging and
     //raising tabs can leave it under the top window, which hides it completely (maximized) or cuts it in half behind
     //whatever window is above (restored). Put it back right above the top tab.
@@ -250,9 +260,10 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                 let strip = this.os.windowFromHwnd(this.ts.hwnd)
                 let prev = top.prevZorder
                 if prev.hwnd <> strip.hwnd then
-                    //if the window above the top tab is topmost, going after it would make the bar topmost too
+                    //if the window above the top tab is an always-on-top one, going after it would make the bar always-on-top
+                    //too; HWND_TOP puts a normal window above every other normal window and still under the topmost ones
                     if prev.hwnd <> IntPtr.Zero && prev.isTopMost && top.isTopMost.not then
-                        strip.insertAfter(WindowHandleTypes.HWND_NOTOPMOST)
+                        strip.insertAfter(WindowHandleTypes.HWND_TOP)
                     else
                         strip.insertAfter(prev)
 
@@ -267,7 +278,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                 this.saveTopWindowPlacement()
                 this.adjustChildWindows()
                 this.restoreTopTab()
-            this.raiseStrip()
+            this.raiseStripSoon()
 
     //called for every size/position change of the top window that is not part of a mouse drag
     member private this.touchMotion() =
@@ -483,7 +494,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             this.adjustChildWindows()
             this.makeTopWindowForeground()
         isMaximizedExport.update()
-        this.raiseStrip()
+        this.raiseStripSoon()
         this.updateIsVisible()
 
     //-------------------------------------------------------------- split view
@@ -708,6 +719,9 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                     this.foreground <- this.os.foreground.hwnd
                     isMaximizedExport.update()
                     this.raiseStrip()
+            elif this.windows.contains(hwnd) then
+                //another tab was placed or maximized behind the top one: it may have landed between the top tab and its bar
+                this.raiseStrip()
         | WinEvent.EVENT_SYSTEM_FOREGROUND ->
             this.foreground <- hwnd
             this.saveZorder()
