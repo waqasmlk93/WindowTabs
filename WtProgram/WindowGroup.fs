@@ -198,7 +198,13 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             //swapped out and is still first in the z-order) waits behind them at the size of the frame
             zorderCell.value.where(fun (hwnd:IntPtr) -> this.isTile(hwnd).not).iter(this.adjustWindowPlacement)
         else
-            zorderCell.value.tail.iter(this.adjustWindowPlacement)
+            //every tab that is placed is put straight back behind the one before it: resizing or maximizing a window
+            //can raise it, and a raised tab is a flash of the wrong window
+            let above = ref zorderCell.value.head
+            zorderCell.value.tail.iter <| fun hwnd ->
+                this.adjustWindowPlacement(hwnd)
+                this.os.windowFromHwnd(hwnd).insertAfterAsync(above.Value)
+                above := hwnd
 
     member private this.adjustChildWindows = fun() ->
         this.updatePlacements()
@@ -372,7 +378,7 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             let window = this.os.windowFromHwnd(hwnd)
             if window.isMinimized.not then
                 if window.isMaximized then window.showWindow(ShowWindowCommands.SW_SHOWNOACTIVATE)
-                window.move(bounds)
+                window.moveAsync(bounds)
         | None -> ()
 
     member private this.adjustWindowPlacement(hwnd) =
@@ -389,18 +395,18 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
             if  wp.showCmd = ShowWindowCommands.SW_SHOWNORMAL &&
                 window.placement.showCmd = ShowWindowCommands.SW_SHOWNORMAL
                 then
-                window.move(bounds)
+                window.moveAsync(bounds)
             else
                 if window.placement.showCmd = ShowWindowCommands.SW_SHOWMINIMIZED then
-                    window.setPlacement({wp with showCmd = ShowWindowCommands.SW_SHOWMINIMIZED})
+                    window.setPlacementAsync({wp with showCmd = ShowWindowCommands.SW_SHOWMINIMIZED})
                 else
                     if wp.showCmd = ShowWindowCommands.SW_SHOWMAXIMIZED then
                         //maximized windows won't move from one monitor to another by setting placement alone,
                         //need to first move to the new bounds, then set placement. This also covers a tab that
                         //was parked off screen un-maximized while the group was dragged: it has to land on the
                         //target monitor first, otherwise it maximizes on the monitor it was parked on
-                        window.move(bounds)
-                    window.setPlacement(wp)   
+                        window.moveAsync(bounds)
+                    window.setPlacementAsync(wp)   
                      
     member this.setTabName(hwnd,name) =
         Services.program.setWindowNameOverride(hwnd, name)
@@ -801,17 +807,20 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         if hasAnimation then
             Win32Helper.SetMinMaxAnimation(true)
 
+    //ask every tab at once (each app can take a tenth of a second to react, one after the other that is a visible
+    //wave through the group), then wait until they have all done it so the code that follows sees the new state
+    member private this.showAllAsync(windows:List2<IntPtr>, cmd:int, isDone:Window -> bool) =
+        let pending = windows.map(this.os.windowFromHwnd).where(fun w -> isDone(w).not)
+        pending.iter(fun w -> w.showWindowAsync(cmd))
+        let deadline = Environment.TickCount + 1000
+        while Environment.TickCount < deadline && pending.any(fun w -> isDone(w).not) do
+            System.Threading.Thread.Sleep(2)
+
     member this.minimizeAll = this.suppressAnimation <| fun() ->
-        zorderCell.value.reverse.iter <| fun hwnd ->
-            let window = this.os.windowFromHwnd(hwnd)
-            if window.isMinimized.not then
-                window.showWindow(ShowWindowCommands.SW_SHOWMINNOACTIVE)
-        
+        this.showAllAsync(zorderCell.value.reverse, ShowWindowCommands.SW_SHOWMINNOACTIVE, fun w -> w.isMinimized)
+
     member this.restoreAll = this.suppressAnimation <| fun() ->
-        zorderCell.value.iter <| fun hwnd ->
-            let window = this.os.windowFromHwnd(hwnd)
-            if window.isMinimized then
-                window.showWindow(ShowWindowCommands.SW_SHOWNOACTIVATE)
+        this.showAllAsync(zorderCell.value, ShowWindowCommands.SW_SHOWNOACTIVATE, fun w -> w.isMinimized.not)
         
     member this.tabActivate(Tab(hwnd), force) =
         //activating a tab while the others are still parked would show it where it was parked

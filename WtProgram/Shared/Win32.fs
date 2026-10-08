@@ -296,6 +296,9 @@ and
 
     member this.showWindow(cmd:int) = WinUserApi.ShowWindow(hwnd, cmd).ignore
 
+    //hands the request to the window's own thread and returns at once
+    member this.showWindowAsync(cmd:int) = WinUserApi.ShowWindowAsync(hwnd, cmd).ignore
+
     member this.isMaximized = WinUserApi.IsZoomed(hwnd)
 
     member this.isOwned = WinUserApi.GetWindowLong(hwnd, WindowLongFieldOffset.GWL_HWNDPARENT) <> IntPtr.Zero
@@ -462,6 +465,20 @@ and
             bounds.height,
             true) |> ignore
 
+    //the next calls hand the request to the thread that owns the window and return at once: with a group of tabs the
+    //apps then lay themselves out side by side instead of one after the other (each can take a tenth of a second)
+    member this.moveAsync (bounds:Rect) =
+        WinUserApi.SetWindowPos(hwnd, IntPtr.Zero, bounds.x, bounds.y, bounds.width, bounds.height,
+            SetWindowPosFlags.SWP_NOZORDER ||| SetWindowPosFlags.SWP_NOACTIVATE ||| SetWindowPosFlags.SWP_ASYNCWINDOWPOS) |> ignore
+
+    member this.insertAfterAsync (hwndInsertAfter:IntPtr) =
+        WinUserApi.SetWindowPos(hwnd, hwndInsertAfter, 0, 0, 0, 0,
+            SetWindowPosFlags.SWP_NOOWNERZORDER ||| SetWindowPosFlags.SWP_NOMOVE ||| SetWindowPosFlags.SWP_NOSIZE |||
+            SetWindowPosFlags.SWP_NOACTIVATE ||| SetWindowPosFlags.SWP_ASYNCWINDOWPOS) |> ignore
+
+    member this.setPlacementAsync (wp:OSWindowPlacement) =
+        this.setPlacement({ wp with flags = wp.flags ||| WindowPlacementFlags.WPF_ASYNCWINDOWPLACEMENT })
+
     //the edges you can see: GetWindowRect also covers the invisible resize borders Windows 10/11 put around a window
     member this.visibleBounds : Rect =
         let mutable rc = RECT()
@@ -531,18 +548,28 @@ and
             Mon.all.map(fun monitor -> monitor.workRect.BR).fold (Pt(Int32.MinValue, Int32.MinValue)) <| fun best br ->
                 if br.x > best.x || (br.x = best.x && br.y > best.y) then br else best
         let corner = Pt(corner.x-1, corner.y-1)
-        //SetWindowPlacement ignores the new rcNormalPosition when the same call also un-maximizes the window,
-        //which left maximized tabs sitting visibly at their old spot while the group was dragged: restore first
-        if this.isMaximized then this.showWindow(ShowWindowCommands.SW_SHOWNOACTIVATE)
-        let placement = this.placement
-        this.setPlacement({
-            placement with
-                showCmd = ShowWindowCommands.SW_SHOWNOACTIVATE
-                rcNormalPosition = Rect(
-                    corner,
-                    if size.IsSome then size.Value else placement.rcNormalPosition.size
-                )
-        })
+        if size.IsNone then
+            //just slide the window away, no size change and no change of state: un-maximizing would make the app lay
+            //itself out again (slow, and a full-screen tab stays in view around the small top window while it does),
+            //and the request is asynchronous, so it must not be one that could un-minimize the tab if it is still
+            //waiting in the app's queue when the group is minimized next
+            WinUserApi.SetWindowPos(hwnd, IntPtr.Zero, corner.x, corner.y, 0, 0,
+                SetWindowPosFlags.SWP_NOSIZE ||| SetWindowPosFlags.SWP_NOZORDER ||| SetWindowPosFlags.SWP_NOACTIVATE |||
+                SetWindowPosFlags.SWP_ASYNCWINDOWPOS) |> ignore
+        else
+            //SetWindowPlacement ignores the new rcNormalPosition when the same call also un-maximizes the window,
+            //which left maximized tabs sitting visibly at their old spot while the group was dragged: restore first
+            if this.isMaximized then this.showWindow(ShowWindowCommands.SW_SHOWNOACTIVATE)
+            let placement = this.placement
+            //not async: a request still waiting in the app's queue would un-minimize the tab if the group is minimized next
+            this.setPlacement({
+                placement with
+                    showCmd = ShowWindowCommands.SW_SHOWNOACTIVATE
+                    rcNormalPosition = Rect(
+                        corner,
+                        if size.IsSome then size.Value else placement.rcNormalPosition.size
+                    )
+            })
 
     override this.Equals(yobj) =
         match yobj with

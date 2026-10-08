@@ -56,7 +56,8 @@ type Program() as this =
     let version = "2025.06.30"
     let isStandAlone = System.Diagnostics.Debugger.IsAttached 
 
-    let mutex = new Mutex(false, "BemoSoftware.WindowTabs")
+    //WT_MUTEX lets a second copy run side by side (used by the automated tests)
+    let mutex = new Mutex(false, (match Environment.GetEnvironmentVariable("WT_MUTEX") with | null | "" -> "BemoSoftware.WindowTabs" | name -> name))
     let Cell = CellScope()
     let os = OS()
     let invoker = InvokerService.invoker
