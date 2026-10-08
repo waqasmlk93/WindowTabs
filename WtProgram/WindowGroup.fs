@@ -250,7 +250,10 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
         this.raiseStrip()
         stripChecks.Value |> List.iter (fun d -> d.Dispose())
         stripChecks := [60; 180; 400; 800; 1500; 2500] |> List.map (fun ms ->
-            ThreadHelper.cancelablePostBack ms (fun() -> this.invokeAsync <| fun() -> this.raiseStrip()))
+            ThreadHelper.cancelablePostBack ms (fun() -> this.invokeAsync <| fun() ->
+                this.raiseStrip()
+                //some apps lay themselves out again after being resized: keep the docked row free of them
+                this.dockLayout()))
 
     //The tab bar is a window owned by the top tab and has to sit directly above it. Maximizing, restoring, dragging and
     //raising tabs can leave it under the top window, which hides it completely (maximized) or cuts it in half behind
@@ -334,7 +337,9 @@ type WindowGroup(enableSuperBar:bool, plugins:List2<IPlugin>) as this =
                     let l, t, r, b = v.left - w.left, v.top - w.top, w.right - v.right, w.bottom - v.bottom
                     let rect = Rect(Pt(target.left - l, target.top - t), Sz(target.width + l + r, target.height + t + b))
                     zorderCell.value.tail.where(fun hwnd -> this.os.windowFromHwnd(hwnd).isMinimized.not).iter <| fun hwnd ->
-                        this.os.windowFromHwnd(hwnd).moveAsync(rect)
+                        let sibling = this.os.windowFromHwnd(hwnd)
+                        if sibling.isMaximized.not || this.dockClose(sibling.visibleBounds, target).not then
+                            sibling.moveAsync(rect)
                 | _ -> ()
                 if this.dockWanted.not then dockActive := false
 

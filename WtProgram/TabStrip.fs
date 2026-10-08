@@ -60,6 +60,8 @@ type TabStrip(monitor:ITabStripMonitor) as this =
     let isShrunkCell = Cell.create(false)
     //the bar sits in its own docked row: it is drawn on a solid background, nothing of a window shows through
     let dockedRowCell = Cell.create(false)
+    //the bar is kept out of sight (a window with no other tab, until the mouse is at its top edge) whatever else says
+    let suppressedCell = Cell.create(false)
     //the picture of the bar is kept: drawing it is slow, moving the window it is on is cheap
     let imageCell = Cell.create(None : Img option)
     let lastShown = ref (None : (Img * byte * bool) option)
@@ -388,8 +390,12 @@ type TabStrip(monitor:ITabStripMonitor) as this =
         and set(value) = alphaCell.set(value)
 
     member this.visible 
-        with get() = visibleCell.value
+        with get() = visibleCell.value && suppressedCell.value.not
         and set(value) = visibleCell.set(value)
+
+    member this.suppressed
+        with get() = suppressedCell.value
+        and set(value) = suppressedCell.set(value)
             
     member this.transparent 
         with get() = transparentCell.value

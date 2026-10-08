@@ -14,6 +14,8 @@ type TabStripDecorator(group:WindowGroup) as this =
     let dropTarget = Cell.create(None)
     let mouseEvent = Event<_>()
     let _ts = TabStrip(this :> ITabStripMonitor)
+    //docked bar: the mouse is on the strip of screen where the bar of a window with no other tab opens
+    let edgeHoverCell = Cell.create(false)
 
     do this.init()
 
@@ -68,6 +70,8 @@ type TabStripDecorator(group:WindowGroup) as this =
         group.removed.Add <| fun _ -> group.refreshDock()
         group.appearanceChanged.Add <| fun() -> group.refreshDock()
         group.isMaximized.changed.Add <| fun() -> this.updateTsPlacement()
+        this.ts.isMouseOver.changed.Add <| fun() -> this.updateTsPlacement()
+        this.initEdgeHover()
 
         group.exited.Add <| fun() ->
             Services.dragDrop.unregisterTarget(this.ts.hwnd)
@@ -84,6 +88,9 @@ type TabStripDecorator(group:WindowGroup) as this =
         let dock = Services.settings.getValue("dockTabBar").cast<bool>()
         //with the docked bar a window without other tabs keeps a thin bar that opens when the mouse is over it
         let hideSingle = dock.not && Services.settings.getValue("hideSingleTab").cast<bool>() && this.ts.tabs.count <= 1
+        //docked bar: nothing is drawn over a window that has no other tab, except while the mouse is at its top edge
+        let lonelyHidden = dock && this.ts.tabs.count <= 1 && edgeHoverCell.value.not && this.ts.isMouseOver.value.not
+        this.ts.suppressed <- lonelyHidden
         if group.bounds.value.IsNone || hideSingle then
             this.ts.visible <- false
         else
@@ -99,6 +106,39 @@ type TabStripDecorator(group:WindowGroup) as this =
             | None ->
                 this.ts.setPlacement(this.placement)
             this.ts.visible <- true
+
+    //watches the mouse: over the top edge of a window that has no other tab the bar opens (a timer, because there is no
+    //window there to receive the mouse, so nothing sits over the title bar and blocks clicks)
+    member private this.initEdgeHover() =
+        let pending = ref false
+        //a plain background timer (it does not depend on which thread this was built on); the group's state is only
+        //touched on the group's own thread
+        let onTick = fun (_:obj) ->
+          if pending.Value.not then
+            pending := true
+            group.invokeAsync <| fun() ->
+              pending := false
+              try
+                let dock = Services.settings.getValue("dockTabBar").cast<bool>()
+                let inZone =
+                    if dock && group.tabCount <= 1 && group.bounds.value.IsSome then
+                        let p = Control.MousePosition
+                        let bar = this.placement
+                        let r = bar.bounds
+                        //an open bar over the window: its first few pixels; a bar above the window: the few pixels just above it
+                        let zone =
+                            if bar.showInside then
+                                //a maximized window's frame starts above the screen: the strip to watch is the screen's top edge
+                                Rect(Pt(r.x, max r.y (Screen.FromPoint(p).Bounds.Top)), Sz(r.width, 3))
+                            else Rect(Pt(r.x, r.y + r.height - 7), Sz(r.width, 7))
+                        p.X >= zone.x && p.X < zone.x + zone.width && p.Y >= zone.y && p.Y < zone.y + zone.height
+                    else false
+                if inZone <> edgeHoverCell.value then
+                    edgeHoverCell.value <- inZone
+                    this.updateTsPlacement()
+              with _ -> ()
+        let timer = new System.Threading.Timer(System.Threading.TimerCallback(onTick), null, 200, 70)
+        group.exited.Add <| fun() -> timer.Dispose()
 
     member private this.invokeAsync f = group.invokeAsync f
     member private this.invokeSync f = group.invokeSync f
@@ -396,9 +436,8 @@ type TabStripDecorator(group:WindowGroup) as this =
             //(docked bar: a window with no other tab keeps a thin bar that opens on hover; with several tabs the bar
             //is always shown in its own row and does not collapse when maximized)
             let dock = Services.settings.getValue("dockTabBar").cast<bool>()
-            let lonely = dock && group.tabCount <= 1
             let shrink = 
-                (alwaysHide || lonely || (dock.not && isMaximized.value && autoHideCell.value)) &&  
+                (alwaysHide || (dock.not && isMaximized.value && autoHideCell.value)) &&   
                 isMouseOver.value.not && 
                 isDraggingCell.value.not &&
                 contextMenuVisibleCell.value.not &&
